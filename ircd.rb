@@ -63,10 +63,10 @@ class User
 	end
 
 	def cleanup(reason='Remote host closed the connection')
-		@ircd.send_visible(self, ":#{fqdn} QUIT :#{reason}")
 		@ircd.user.delete_if { |k, v| v == self }
+		@ircd.send_visible(self, ":#{fqdn} QUIT :#{reason}")
 		@ircd.clean_chans
-		@fd.to_io.close rescue nil
+		fd.to_io.close rescue nil
 	end
 
 	def handle_line(l)
@@ -78,6 +78,8 @@ class User
 
 	def send(*a)
 		(fd || from_server.fd).write a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
+	rescue
+		cleanup('Broken pipe') if fd
 	end
 end
 
@@ -116,12 +118,16 @@ class Server
 
 	def sconnect_rc4
 		send 'DKEY INIT'
-		p @ircd.fd_gets(@fd)
-		raise
+		loop do
+			l = @ircd.fd_gets(@fd)
+			break if l.to_s == ''
+			p l
+		end
+		raise	# TODO
 	end
 
 	def can_read
-		if not l = @ircd.fd_gets(fd)
+		if not l = @ircd.fd_gets(@fd)
 			cleanup
 		else
 			handle_line(@ircd.split_line(l))
@@ -132,9 +138,8 @@ class Server
 		@ircd.servers.delete self
 		oldu = @ircd.users.find_all { |u| u.from_server == self }
 		oldu.each { |u| @ircd.user.delete u.nick }
-		@ircd.clean_chans
+		oldu.each { |u| u.cleanup "srv1 srv2" }
 		@ircd.notice_opers("closing cx to server #{@cline[:host]}")
-		oldu.each { |u| @ircd.send_visible(u, ":#{u.fqdn} QUIT :srv1 srv2") }
 		@fd.to_io.close rescue nil
 	end
 
@@ -159,20 +164,14 @@ class Port
 		@descr = descr
 
 		if @descr[:ssl]
-			sslkey = OpenSSL::PKey::RSA.new(512)
-			sslcert = OpenSSL::X509::Certificate.new
-			sslcert.not_before = Time.now
-			sslcert.not_after = Time.now + 3600 * 24 * 365 * 10
-			sslcert.public_key = sslkey.public_key
-			sslcert.sign(sslkey, OpenSSL::Digest::SHA1.new)
 			@sslctx = OpenSSL::SSL::SSLContext.new
-			@sslctx.key = sslkey
-			@sslctx.cert = sslcert
+			@sslctx.key = OpenSSL::PKey::RSA.new(File.open(@ircd.conf.ssl_key_path))
+			@sslctx.cert = OpenSSL::X509::Certificate.new(File.open(@ircd.conf.ssl_cert_path))
 		end
 	end
 
 	def can_read
-		Timeout.timeout(4, RuntimeError) {
+		Timeout.timeout(2, RuntimeError) {
 			afd, sockaddr = @fd.accept
 			return if not afd
 			afd = accept_ssl(afd) if @descr[:ssl]
@@ -186,6 +185,11 @@ class Port
 		fd.sync = true
 		fd.accept
 		fd
+	end
+
+	def cleanup
+		@ircd.ports.delete self
+		@fd.to_io.close rescue nil
 	end
 end
 
@@ -281,11 +285,11 @@ class Ircd
 
 	def rehash
 		puts 'rehash'
-		load __FILE__
-		conf = Conf.new
+		load __FILE__	# reload this source
+		conf = Conf.new	# reload the configuration
 		conf.load(@conffile)
-		@conf = conf
-		startup
+		@conf = conf	# this allows conf.load to fail/raise without impacting the existing @conf
+		startup		# apply conf changes (ports/clines/olines)
 	end
 
 	def users
@@ -343,9 +347,17 @@ class Ircd
 	end
 
 	def startup
+		# close old ports no longer in conf (close first to allow reuse)
+		@ports.dup.each { |p|
+			next if @conf.ports.find { |pp| p.descr == pp }
+			p.cleanup
+		}
+
+		# open new ports from conf
 		@conf.ports.each { |p|
 			next if @ports.find { |pp| pp.descr == p }
 			fd = TCPServer.open(p[:host], p[:port])
+			puts "listening on #{p[:host]}:#{p[:port]}#{' (ssl)' if p[:ssl]}"
 			@ports << Port.new(self, fd, p)
 		}
 
@@ -357,6 +369,7 @@ class Ircd
 				@servers << sv
 			end
 		}
+		# opers will squit servers no longer needed
 	end
 
 	def main_loop_iter
@@ -412,13 +425,13 @@ class Ircd
 
 	# fd => Client/Server/Port
 	def fd_to_recv(fd)
-		(ports + servers + local_users + pending).find { |o| fd == o.fd.to_io }
+		(ports + servers + local_users + pending).find { |o| fd == o.fd or fd == o.fd.to_io }	# SSL => no to_io
 	end
 
 	# read a line byte by byte
 	def fd_gets(fd, maxlen=512)
 		l = ''
-		while IO.select([fd], nil, nil, 0)
+		while fd.respond_to?(:pending) ? fd.pending : IO.select([fd], nil, nil, 0)	# yay OpenSSL
 			return if not c = fd.read(1)
 			return if l.length > maxlen*8
 			break if c == "\n"
@@ -456,12 +469,17 @@ class Conf
 	# list of { :host => '1.2.3.4', :port => 42, :pass => 'secret', :crypt => true, :zip => true }
 	attr_accessor :clines
 	attr_accessor :ping_timeout
+	attr_accessor :motd_path
+	attr_accessor :ssl_key_path, :ssl_cert_path
 
 	def initialize
 		@ports = []
 		@olines = []
 		@clines = []
 		@ping_timeout = 180
+		@motd_path = 'motd'
+		@ssl_key_path = 'ssl_key.pem'
+		@ssl_cert_path = 'ssl_cert.pem'
 	end
 
 	def load(filename)

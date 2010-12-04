@@ -1,8 +1,9 @@
 class User
 	def handle_command(l)
+		p l
 		case l[0].to_s.downcase
-		when 'privmsg'
-		when 'join'
+		#when 'privmsg'
+		#when 'join'
 		when 'nick'
 			nick = l[1]
 			if not @ircd.check_nickname(nick)
@@ -18,26 +19,28 @@ class User
 			end
 		when 'ping'
 			sv_send 'PONG', @ircd.name, ":#{l[1]}"
+		when 'pong'
+			@last_pong = Time.now.to_f if l[1] == @ircd.name
 		when 'quit'
 			send "ERROR :Closing Link: 0.0.0.0 (Quit: )"
 			cleanup(l[1])
-			return
-		when 'part'
-		when 'kick'
-		when 'mode'
-		when 'oper'
-		when 'topic'
-		when 'pong'
-			@last_pong = Time.now.to_f if l[1] == @ircd.name
-		when 'kill'
-		when 'list'
-		when 'who'
-		when 'whois'
-		when 'names'
+		#when 'part'
+		#when 'kick'
+		#when 'mode'
+		#when 'oper'
+		#when 'topic'
+		#when 'kill'
+		#when 'list'
+		#when 'who'
+		#when 'whois'
+		#when 'names'
+		#when 'samode'
+		when 'motd'
+			send_motd
 		when ''
 		else puts "unhandled user command #{l.inspect}"
+		     sv_send 'WTF', @nick, ':lolz', l.inspect
 		end
-		sv_send 'WTF', @nick, ':lolz'
 	end
 
 	def send_welcome
@@ -48,7 +51,9 @@ class User
 	def send_motd
 		sv_send 375, @nick, ":- #{@ircd.name} message of the day"
 		sv_send 372, @nick, ":- #{Time.now.strftime('%d/%m/%Y %H:%M')}"
-		sv_send 372, @nick, ":- lolz !"
+		File.read(@ircd.conf.motd_path).each_line { |l|
+			sv_send 372, @nick, ":- #{l.chomp}"
+		} rescue nil
 		sv_send 376, @nick, ':End of /MOTD command'
 	end
 end
@@ -138,13 +143,16 @@ class Pending
 		sv_send 'NOTICE', 'AUTH', ':*** Checking Ident'
 		Timeout.timeout(2, RuntimeError) {
 			pa = @fd.to_io.peeraddr
-			TCPSocket.connect(pa[3], 113) { |id|
-				id.write "FUFU"
-			}
+			la = @fd.to_io.addr
+			ans = TCPSocket.open(pa[3], 113) { |id|
+				id.puts "#{pa[1]},#{la[1]}"
+				id.gets
+			}.chomp.split(':')
+			@ident = ans[3] if ans[1] == 'USERID'
 		}
 		sv_send 'NOTICE', 'AUTH', ':*** Got Ident response'
 	rescue
-		sv_send 'NOTICE', 'AUTH', ':*** No Ident response'
+		sv_send 'NOTICE', 'AUTH', ':*** No Ident response', $!.class.name, $!.message
 	end
 
 	def wait_hostname
