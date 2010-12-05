@@ -5,6 +5,7 @@
 require 'socket'
 require 'timeout'
 require 'openssl'
+require 'digest/md5'
 
 module HasSock
 	attr_accessor :ircd, :fd
@@ -25,12 +26,14 @@ class User
 
 	attr_accessor :nick, :ident, :hostname, :descr
 	attr_accessor :mode
-	# list of Channel
-	attr_accessor :channels
+	attr_accessor :away
+	attr_accessor :connect_time
 	# Time.to_f of the last message sent from the user (whois idle)
 	attr_accessor :last_active
+	# ping timeout parameters
 	attr_accessor :last_ping, :last_pong
-	attr_accessor :next_read_time	# antiflood
+	# antiflood
+	attr_accessor :next_read_time
 	# reference to the Server that introduced this nick (nil if local)
 	attr_accessor :from_server
 
@@ -45,9 +48,21 @@ class User
 			@fd = fd
 		end
 		@mode = ''
-		@channels = []
-		@last_active = @last_ping = @last_pong = Time.now.to_f
+		@away = nil
+		@connect_time = @last_active = @last_ping = @last_pong = Time.now.to_f
 		@next_read_time = @last_active - 10
+	end
+
+	def local?
+		not from_server
+	end
+
+	def servername
+		local? ? @ircd.name : @from_server.name
+	end
+
+	def chans
+		@ircd.chans.find_all { |c| c.users.include? self }
 	end
 
 	def fqdn
@@ -62,12 +77,12 @@ class User
 		end
 	end
 
-	def cleanup(reason='Remote host closed the connection')
+	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection")
 		@ircd.user.delete_if { |k, v| v == self }
-		@ircd.send_visible(self, ":#{fqdn} QUIT :#{reason}")
+		@ircd.send_visible(self, reason)
 		@ircd.clean_chans
-		fd.to_io.close rescue nil
 		fd.close rescue nil
+		fd.to_io.close rescue nil
 	end
 
 	def handle_line(l)
@@ -80,7 +95,14 @@ class User
 	def send(*a)
 		(fd || from_server.fd).write a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
 	rescue
-		cleanup('Broken pipe') if fd
+		puts "#{Time.now} #{fqdn} #{$!} #{$!.message}"
+		cleanup ":#{fqdn} QUIT :Broken pipe" if fd
+	end
+
+	def send_welcome
+		sv_send '001', @nick, ":Welcome to the RB IRC Network #{fqdn}"
+		cmd_motd ['MOTD']
+		cmd_mode ['MODE', @nick, '+i']
 	end
 end
 
@@ -89,6 +111,7 @@ class Server
 	include HasSock
 
 	attr_accessor :cline
+	attr_accessor :name, :descr
 
 	def initialize(ircd, fd, cline)
 		@ircd = ircd
@@ -101,6 +124,7 @@ class Server
 		sv.sconnect
 		sv
 	rescue
+		puts "#{Time.now} #{$!} #{$!.message}", $!.backtrace, ''
 	end
 
 	def sconnect
@@ -139,7 +163,7 @@ class Server
 		@ircd.servers.delete self
 		oldu = @ircd.users.find_all { |u| u.from_server == self }
 		oldu.each { |u| @ircd.user.delete u.nick }
-		oldu.each { |u| u.cleanup "srv1 srv2" }
+		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :srv1 srv2" }
 		@ircd.notice_opers("closing cx to server #{@cline[:host]}")
 		@fd.to_io.close rescue nil
 	end
@@ -157,14 +181,14 @@ end
 class Port
 	attr_accessor :ircd
 	attr_accessor :fd
-	attr_accessor :descr
+	attr_accessor :pline
 
-	def initialize(ircd, fd, descr)
+	def initialize(ircd, fd, pline)
 		@ircd = ircd
 		@fd = fd
-		@descr = descr
+		@pline = pline
 
-		if @descr[:ssl]
+		if @pline[:ssl]
 			@sslctx = OpenSSL::SSL::SSLContext.new
 			@sslctx.key = OpenSSL::PKey::RSA.new(File.open(@ircd.conf.ssl_key_path))
 			@sslctx.cert = OpenSSL::X509::Certificate.new(File.open(@ircd.conf.ssl_cert_path))
@@ -175,10 +199,11 @@ class Port
 		Timeout.timeout(2, RuntimeError) {
 			afd, sockaddr = @fd.accept
 			return if not afd
-			afd = accept_ssl(afd) if @descr[:ssl]
+			afd = accept_ssl(afd) if @pline[:ssl]
 			@ircd.pending << Pending.new(ircd, afd, sockaddr, self)
 		}
 	rescue
+		puts "#{Time.now} #{$!} #{$!.message}", $!.backtrace, ''
 	end
 
 	def accept_ssl(fd)
@@ -224,6 +249,7 @@ class Pending
 	def cleanup
 		@ircd.user.delete @nick
 		@ircd.pending.delete self
+		@fd.close rescue nil
 		@fd.to_io.close rescue nil
 	end
 
@@ -231,10 +257,59 @@ class Pending
 		l.shift if l[0] and l[0][0] == ?:	# ignore 'from'
 		handle_command(l)
 	end
+
+	def check_conn
+		return if not @user or not @nick
+		wait_hostname
+		wait_ident
+		clt = User.new(@ircd, @nick, @ident || "~#{@user[1]}", @hostname, @fd)
+		clt.descr = @user[4]
+		clt.mode << 'S' if @fromport.pline[:ssl]
+		@ircd.pending.delete self
+		@ircd.user[@nick.downcase] = clt
+		clt.send_welcome
+	end
+
+	# TODO async dns/ident
+	def retrieve_hostname
+		@hostname = '0.0.0.0'
+		sv_send 'NOTICE', 'AUTH', ':*** Looking up your hostname...'
+		pa = @fd.to_io.peeraddr
+		@hostname = pa[3]
+		Timeout.timeout(2, RuntimeError) {
+			@hostname = Socket.gethostbyaddr(@hostname.split('.').map { |i| i.to_i }.pack('C*'))[0]
+		}
+		sv_send 'NOTICE', 'AUTH', ':*** Found your hostname'
+	rescue
+		sv_send 'NOTICE', 'AUTH', ':*** Couldn\'t look up your hostname'
+	end
+
+	def retrieve_ident
+		sv_send 'NOTICE', 'AUTH', ':*** Checking Ident'
+		Timeout.timeout(2, RuntimeError) {
+			pa = @fd.to_io.peeraddr
+			la = @fd.to_io.addr
+			ans = TCPSocket.open(pa[3], 113) { |id|
+				id.puts "#{pa[1]},#{la[1]}"
+				id.gets
+			}.chomp.split(':')
+			@ident = ans[3] if ans[1] == 'USERID'
+		}
+		sv_send 'NOTICE', 'AUTH', ':*** Got Ident response'
+	rescue
+		sv_send 'NOTICE', 'AUTH', ':*** No Ident response', $!.class.name, $!.message
+	end
+
+	def wait_hostname
+	end
+
+	def wait_ident
+	end
 end
 
 # a channel
 class Channel
+	attr_accessor :ircd
 	attr_accessor :name
 	attr_accessor :topic, :topicwhen, :topicwho
 	attr_accessor :key	# mode +k
@@ -242,28 +317,43 @@ class Channel
 	attr_accessor :mode
 	# lists of User (one User can be in multiple lists)
 	attr_accessor :users, :ops, :voices
-	# list of ban masks (Strings)
+	# list of ban masks { :mask => '*!*@lol.com', :who => 'foo!bar@baz.quux', :when => 1234222343 }
 	attr_accessor :bans, :banexcept
-	# list of nicks
+	# same as ban masks, with :user instead of :mask (=> User)
 	attr_accessor :invites
 
-	def initialize(name)
+	def initialize(ircd, name)
+		@ircd = ircd
 		@name = name
 		@mode = ''
 		@users = []
 		@ops = []
 		@voices = []
 		@bans = []
+		@banexcept = []
 		@invites = []
+	end
+
+	def banned?(user)
+		@bans.find { |b| @ircd.match_mask(b[:mask], user.fqdn) } and
+		not @banexcept.find { |e| @ircd.match_mask(e[:mask], user.fqdn) }
+	end
+
+	def op?(user)
+		@ops.include? user
+	end
+
+	def voice?(user)
+		@voices.include? user
 	end
 end
 
 # our server
 class Ircd
-	# hash nickname => User
+	# hash nickname.downcase => User
 	attr_accessor :user
-	# hash chan name => Channel
-	attr_accessor :channel
+	# hash chan name.downcase => Channel
+	attr_accessor :chan
 	# list of Server
 	attr_accessor :servers
 	# local Ports we listen to
@@ -275,7 +365,7 @@ class Ircd
 
 	def initialize(conffile=nil)
 		@user = {}
-		@channel = {}
+		@chan = {}
 		@servers = []
 		@ports = []
 		@pending = []
@@ -286,6 +376,10 @@ class Ircd
 
 	def name
 		@conf.name
+	end
+
+	def descr
+		@conf.descr
 	end
 
 	def rehash
@@ -302,7 +396,7 @@ class Ircd
 	end
 
 	def local_users
-		users.find_all { |u| not u.from_server }
+		users.find_all { |u| u.local? }
 	end
 
 	def local_users_canread
@@ -318,14 +412,14 @@ class Ircd
 		opers.each { |u| u.sv_send('NOTICE', u.nick, ":#{msg}") }
 	end
 
-	def channels
-		@channel.values
+	def chans
+		@chan.values
 	end
 
 	# one or more Users disconnected, remove them from chans, remove empty chans
 	def clean_chans
 		users = self.users
-		channel.delete_if { |k, v|
+		@chan.delete_if { |k, v|
 			v.users &= users
 			v.ops &= users
 			v.voices &= users
@@ -342,42 +436,79 @@ class Ircd
 		n.length < 32 and n =~ /^[#&][a-z_`\[\]\\{}|\^0-9-]*$/i
 	end
 
+	def downcase(str)
+		str.tr('A-Z[\\]', 'a-z{|}')
+	end
+
+	def find_user(nick) @user[downcase(nick)] end
+	def find_chan(name) @chan[downcase(name)] end
+	def add_user(user) @user[downcase(user.nick)] = user end
+	def add_chan(chan) @chan[downcase(chan.name)] = chan end
+	def del_user(user) @user.delete downcase(user.nick) end
+	def del_chan(chan) @chan.delete downcase(chan.name) end
+
+	# send a message to all connected servers
+	def send_servers(msg)
+		servers.each { |s| s.send msg }
+	end
+
 	# send a message to all local users that have at least one chan in common with usr
 	# also send the message to all servers
 	def send_visible(usr, msg)
-		usrs = channels.find_all { |c| c.users.include? usr }.map { |c| c.users }.flatten.uniq
+		send_servers(msg)
+		usrs = usr.chans.map { |c| c.users }.flatten.uniq - [usr]
 		(usrs & local_users - [usr]).each { |u| u.send msg }
-		servers.each { |s| s.send msg }
 	end
 
 	# send a message to all users of the chan
 	# also send the message to all servers unless the chan is local-only (&chan)
 	def send_chan(chan, msg)
+		send_servers(msg) if chan.name[0] != ?&
 		chan.users.dup.each { |u| u.send msg }
-		servers.each { |s| s.send msg } if chan.name[0] != ?&
 	end
 
 	# same as send_chan, but dont send to usr (eg PRIVMSG etc)
 	def send_chan_butone(chan, usr, msg)
+		send_servers(msg) if chan.name[0] != ?&
 		chan.users.dup.each { |u| u.send msg if u != usr }
-		servers.each { |s| s.send msg } if chan.name[0] != ?&
 	end
 
+	# same as send_chan restricted to chanops, but dont send to usr (eg PRIVMSG etc)
+	def send_chan_op_butone(chan, usr, msg)
+		send_servers(msg) if chan.name[0] != ?&
+		chan.ops.dup.each { |u| u.send msg if u != usr }
+	end
+
+	# send to all servers + +w users
+	def send_wallops(msg)
+		send_servers(msg)
+		local_users.find_all { |u|
+			u.mode.include? 'w' or u.mode.include? 'o'
+		}.each { |u| u.send msg }
+	end
+
+	# send as notice to all opers/+g users
+	def send_global(msg)
+		users.find_all { |u|
+			u.mode.include? 'g' or u.mode.include? 'o'
+		}.each { |u| u.send ":#{name} NOTICE #{u.nick} :*** Global -- #{msg}" }
+	end
+
+
 	def main_loop
-		startup
 		loop { main_loop_iter }
 	end
 
 	def startup
 		# close old ports no longer in conf (close first to allow reuse)
 		@ports.dup.each { |p|
-			next if @conf.ports.find { |pp| p.descr == pp }
+			next if @conf.plines.find { |pp| p.pline == pp }
 			p.cleanup
 		}
 
 		# open new ports from conf
-		@conf.ports.each { |p|
-			next if @ports.find { |pp| pp.descr == p }
+		@conf.plines.each { |p|
+			next if @ports.find { |pp| pp.pline == p }
 			fd = TCPServer.open(p[:host], p[:port])
 			puts "listening on #{p[:host]}:#{p[:port]}#{' (ssl)' if p[:ssl]}"
 			@ports << Port.new(self, fd, p)
@@ -397,8 +528,8 @@ class Ircd
 	def main_loop_iter
 		check_timeouts
 		wait_sockets
-	rescue Exception
-		puts Time.now, $!, $!.message, $!.backtrace, ''
+	rescue
+		puts "#{Time.now} #{$!} #{$!.message}", $!.backtrace, ''
 		sleep 0.4
 	end
 
@@ -413,7 +544,7 @@ class Ircd
 		local_users.dup.each { |u|
 			if u.last_pong < tnow - @conf.ping_timeout
 				u.send 'ERROR', ":Closing Link: #{u.hostname} (Ping timeout)"
-				u.cleanup('Ping timeout')
+				u.cleanup ":#{u.fqdn} QUIT :Ping timeout"
 				next
 			end
 			if u.last_ping < tnow - @conf.ping_timeout / 2
@@ -476,39 +607,84 @@ class Ircd
 
 	# match irc masks ('foo@lol*.com')
 	def match_mask(mask, str)
-		str =~ /^#{Regexp.escape(mask).gsub('\\?', '.').gsub('\\*', '.*')}$/i
+		downcase(str) =~ /^#{Regexp.escape(downcase(mask)).gsub('\\?', '.').gsub('\\*', '.*')}$/
+	end
+
+	# match irc OPER password against hash
+	def check_oper_pass(pass, hash)
+		salt_a, hash_a = hash.split('$')
+
+		salt = salt_a.unpack('m*').first
+
+		md5 = pass
+		(1<<14).times { md5 = Digest::MD5.digest(salt+md5) }
+		md5_a = [salt[0, 2] + md5].pack('m*').chomp
+
+		md5_a == hash_a
+	end
+
+	def self.run(conffile='conf')
+		ircd = new(conffile)
+		ircd.startup
+		trap('HUP') { ircd.rehash }
+		ircd.main_loop
+	end
+
+	def self.run_bg(conffile='conf', logfile='log')
+		File.open(logfile, 'a') {}
+		ircd = new(conffile)	# abort now if there is an error in the conf
+		ircd.startup
+		if pid = Process.fork
+			puts "Running in background, pid #{pid}"
+			return
+		end
+
+		$stdout.reopen File.open(logfile, 'a')
+		$stderr.reopen $stdout
+		trap('HUP') { ircd.rehash }
+		ircd.main_loop
+		exit!
 	end
 end
 
 # set of configuration parameters
 class Conf
 	# our server name
-	attr_accessor :name
+	attr_accessor :name, :descr
 	# list of { :host => '1.2.3.4', :port => 6667, :ssl => true }
-	attr_accessor :ports
-	# list of { :nick => 'lol' (OPER command param), :mask => '*!blabla@*', :pass => '$123$1ade2c39af8a83', :mode => 'oOaARD' }
+	attr_accessor :plines
+	# list of { :nick => 'lol' (OPER command param), :mask => '*!blabla@*', :pass => '123$1azde2', :mode => 'oOaARD' }
 	attr_accessor :olines
-	# list of { :host => '1.2.3.4', :port => 42, :pass => 'secret', :crypt => true, :zip => true }
+	# list of { :host => '1.2.3.4', :port => 42, :pass => 'secret', :rc4 => true, :zip => true }
 	attr_accessor :clines
+
 	attr_accessor :ping_timeout
 	attr_accessor :motd_path
 	attr_accessor :ssl_key_path, :ssl_cert_path
+	attr_accessor :user_chan_limit	# max chan per user
+	attr_accessor :max_chan_mode_cmd	# max chan mode change per /mode command
 
 	def initialize
-		@ports = []
+		@plines = []
 		@olines = []
 		@clines = []
-		@ping_timeout = 180
+
+		# config elements that have no corresponding line in the conf
+		# edit this file to change values
+		# if you change a value in your startup script with ircd.conf.bla = 42, this will be forgotten when rehashing !
 		@motd_path = 'motd'
+		@ping_timeout = 180
 		@ssl_key_path = 'ssl_key.pem'
 		@ssl_cert_path = 'ssl_cert.pem'
+		@user_chan_limit = 25
+		@max_chan_mode_cmd = 6
 	end
 
 	def load(filename)
 		File.read(filename).each_line { |l|
 			l = l.strip
 			case l[0]
-			when ?N; @name = l.split(':')[1]
+			when ?N; n, @name, @descr = l.split(':', 3)
 			when ?P; parse_p_line(l)
 			when ?C; parse_c_line(l)
 			when ?O; parse_o_line(l)
@@ -564,7 +740,7 @@ class Conf
 			else raise "P:host:port:[SSL]"
 			end
 		end
-		@ports << p
+		@plines << p
 	end
 
 	# C:127.0.0.1:7001:RC4:ZIP:1200	# active connection from us, delay = 1200s
@@ -595,7 +771,7 @@ class Conf
 		@clines << c
 	end
 
-	# O:lol@foo.*.com:$123$abcd5salt:OaARD
+	# O:bob:*!lol@*.foo.com:123$azU2/h:OaARD
 	def parse_o_line(l)
 		o = {}
 		fu = split_ipv6(l)
