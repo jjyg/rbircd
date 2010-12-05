@@ -1,0 +1,42 @@
+This software is an IRC daemon written in ruby by Yoann Guillot
+
+To launch the daemon, you should use a script like this one:
+
+----- snip run.rb -----
+require 'ircd'
+
+# change to put the name of your configuration file
+ircd = Ircd.new('conf')
+
+# respond to SIGHUP by reloading the src/conf
+trap('HUP') { ircd.rehash }
+
+# here we go
+ircd.main_loop
+----- snip -----
+
+The server is controlled through a configuration file, here is a sample:
+
+----- snip conf -----
+# the server name (informative only)
+N:my.eleet.server.com
+
+# listening ports
+P:127.0.0.1:6667
+# accept SSL connections
+P:127.0.0.1:7000:SSL
+# yay ipv6
+P:[::1]:6667
+
+# link to other ircds
+C:1.2.3.4:7001:mypassw0rd:RC4:ZIP
+
+# operators: mask : salted MD5 pass : user mode
+O:jj:*!bla@trusted.computing.lol:$1234$a123ef0d002828:OaARD
+----- snip -----
+
+More specific tweaks can be done in the source itself, especially the Conf class (holds ping timeout delays, ssl cert/key paths, etc)
+
+IRC commands are in ircd_commands.rb (duh)
+
+KTHXBAI

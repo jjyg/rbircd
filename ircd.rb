@@ -486,7 +486,7 @@ class Conf
 	attr_accessor :name
 	# list of { :host => '1.2.3.4', :port => 6667, :ssl => true }
 	attr_accessor :ports
-	# list of { :mask => '*!blabla', :pass => '1ade2c39af8a83', :mode => 'oOaARD' }
+	# list of { :nick => 'lol' (OPER command param), :mask => '*!blabla@*', :pass => '$123$1ade2c39af8a83', :mode => 'oOaARD' }
 	attr_accessor :olines
 	# list of { :host => '1.2.3.4', :port => 42, :pass => 'secret', :crypt => true, :zip => true }
 	attr_accessor :clines
@@ -600,6 +600,7 @@ class Conf
 		o = {}
 		fu = split_ipv6(l)
 		fu.shift	# 'O'
+		o[:nick] = fu.shift
 		o[:mask] = fu.shift
 		o[:pass] = fu.shift
 		o[:mode] = fu.shift
