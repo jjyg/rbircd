@@ -67,6 +67,7 @@ class User
 		@ircd.send_visible(self, ":#{fqdn} QUIT :#{reason}")
 		@ircd.clean_chans
 		fd.to_io.close rescue nil
+		fd.close rescue nil
 	end
 
 	def handle_line(l)
@@ -235,13 +236,16 @@ end
 # a channel
 class Channel
 	attr_accessor :name
-	attr_accessor :topic, :topicdate, :topicwho
-	attr_accessor :key
+	attr_accessor :topic, :topicwhen, :topicwho
+	attr_accessor :key	# mode +k
+	attr_accessor :limit	# mode +l
 	attr_accessor :mode
 	# lists of User (one User can be in multiple lists)
 	attr_accessor :users, :ops, :voices
-	# list of bans (masks, Strings)
-	attr_accessor :bans
+	# list of ban masks (Strings)
+	attr_accessor :bans, :banexcept
+	# list of nicks
+	attr_accessor :invites
 
 	def initialize(name)
 		@name = name
@@ -250,6 +254,7 @@ class Channel
 		@ops = []
 		@voices = []
 		@bans = []
+		@invites = []
 	end
 end
 
@@ -319,7 +324,7 @@ class Ircd
 
 	# one or more Users disconnected, remove them from chans, remove empty chans
 	def clean_chans
-		users = users
+		users = self.users
 		channel.delete_if { |k, v|
 			v.users &= users
 			v.ops &= users
@@ -330,7 +335,11 @@ class Ircd
 
 	# checks that a nickname is valid (no forbidden characters)
 	def check_nickname(n)
-		n.length < 32 and n =~ /^[a-z_`][a-z_`\[\]\\\^{}-]*$/i
+		n.length < 32 and n =~ /^[a-z_`\[\]\\{}|\^][a-z_`\[\]\\{}|\^0-9-]*$/i
+	end
+
+	def check_channame(n)
+		n.length < 32 and n =~ /^[#&][a-z_`\[\]\\{}|\^0-9-]*$/i
 	end
 
 	# send a message to all local users that have at least one chan in common with usr
@@ -339,6 +348,19 @@ class Ircd
 		usrs = channels.find_all { |c| c.users.include? usr }.map { |c| c.users }.flatten.uniq
 		(usrs & local_users - [usr]).each { |u| u.send msg }
 		servers.each { |s| s.send msg }
+	end
+
+	# send a message to all users of the chan
+	# also send the message to all servers unless the chan is local-only (&chan)
+	def send_chan(chan, msg)
+		chan.users.dup.each { |u| u.send msg }
+		servers.each { |s| s.send msg } if chan.name[0] != ?&
+	end
+
+	# same as send_chan, but dont send to usr (eg PRIVMSG etc)
+	def send_chan_butone(chan, usr, msg)
+		chan.users.dup.each { |u| u.send msg if u != usr }
+		servers.each { |s| s.send msg } if chan.name[0] != ?&
 	end
 
 	def main_loop
@@ -391,7 +413,7 @@ class Ircd
 		local_users.dup.each { |u|
 			if u.last_pong < tnow - @conf.ping_timeout
 				u.send 'ERROR', ":Closing Link: #{u.hostname} (Ping timeout)"
-				u.cleanup
+				u.cleanup('Ping timeout')
 				next
 			end
 			if u.last_ping < tnow - @conf.ping_timeout / 2
