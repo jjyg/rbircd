@@ -1,50 +1,98 @@
 # pure ruby implementation of Diffie-Hellman and RC4
 
-# from http://labs.mudynamics.com/2007/05/09/diffie-hellman-in-ruby/
-class DH
+module Bignum_ops
 	# b**e % m
 	def mod_exp(b, e, m)
 		raise if e < 0
 		ret = 1
 		while e > 0
-			ret = (ret * b) % m if e[0] == 1
+			ret = (ret * b) % m if (e&1) == 1
 			e >>= 1
 			b = (b * b) % m
 		end
 		ret
 	end
 
-	# hamming weight
-	def bit_count(b)
-		raise if b < 0
-		ret = 0
-		while b > 0
-			ret += b[0]
-			b >>= 1
+	SMALL_PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+
+	# miller rabin probabilistic primality test
+	# t = 3 adequate for n > 1000, smaller are found in SMALL_PRIMES
+	def miller_rabin(n, t=3)
+		return false if n < 2
+		return true if SMALL_PRIMES.include?(n)
+
+		SMALL_PRIMES.each { |p|
+			return false if n % p == 0
+		}
+
+		s = 0
+		r = n-1
+		while r & 1 == 0
+			s += 1
+			r >>= 1 
 		end
-		ret
+
+		t.times { |i|
+			# 1st round uses 2, subsequent use rand(2..n-2)
+			a = (i == 0 ? 2 : crypt_rand(2, n-2))
+			y = mod_exp(a, r, n)
+			if y != 1 and y != n-1
+				(s-1).times {
+					break if y == n-1
+					y = mod_exp(y, 2, n)
+					return false if y == 1
+				}
+				return false if y != n-1
+			end
+		}
+
+		return true
 	end
 
-	attr_accessor :p, :g, :q, :x, :e
+	# create a random number min <= n <= max from /dev/urandom
+	def crypt_rand(min, max)
+		return min if max <= min
+		nr = 0
+		File.open('/dev/urandom', 'r') { |fd|
+			while nr < max-min
+				nr = (nr << 8) | fd.read(1).unpack('C')[0]
+			end
+		}
+		min + (nr % (max-min+1))
+	end
+end
 
-	# p = prime, g = generator, q = subgroup order
-	def initialize(p, g, q)
+class DH
+	include Bignum_ops
+
+	attr_accessor :p, :g, :x, :e
+
+	# p = prime, g = generator
+	def initialize(p, g)
 		@p = p
 		@g = g
-		@q = q
+		validate
 		generate
+	end
+
+	# check that p is a strong prime, and that g is a generator
+	def validate
+		raise 'DH: p not prime' if not check_prime(@p)
+		raise 'DH: p not strong prime' if not check_prime((@p-1)/2)
+		raise 'DH: bad generator 1' if mod_exp(@g, 2, @p) == 1
+		raise 'DH: bad generator 2' if mod_exp(@g, (@p-1)/2, @p) == 1
+		raise 'DH: bad generator 3' if mod_exp(@g, (@p-1), @p) != 1
+	end
+
+	# returns true if n is prime
+	def check_prime(n)
+		miller_rabin(n)
 	end
 
 	# create a random secret & public nr
 	def generate
-		until valid?
-			@x = rand(@q)
-			@e = mod_exp(@g, @x, @p)
-		end
-	end
-
-	def valid?
-		e and @e >= 2 and @e <= @p-2 and bit_count(@e) > 1
+		@x = crypt_rand(1, @p-2)
+		@e = mod_exp(@g, @x, @p)
 	end
 
 	# compute the shared secret given the public key
@@ -53,8 +101,8 @@ class DH
 	end
 
 	def self.test
-		alice = DH.new(53, 5, 23)
-		bob   = DH.new(53, 5, 15)
+		alice = DH.new(107, 2)
+		bob   = DH.new(107, 2)
 		raise if alice.secret(bob.e) != bob.secret(alice.e)
 	end
 end
