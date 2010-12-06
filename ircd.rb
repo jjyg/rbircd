@@ -517,7 +517,7 @@ class Ircd
 		@conf.clines.each { |c|
 			next if not c[:port]
 			next if @servers.find { |s| s.cline == c }
-			fd = TCPSocket.open(p[:host], p[:port])
+			fd = TCPSocket.open(c[:host], c[:port])
 			if sv = Server.sconnect(self, fd, c)
 				@servers << sv
 			end
@@ -761,9 +761,9 @@ class Conf
 
 		while e = fu.shift
 			case e
-			when 'RC4'; p[:rc4] = true
-			when 'ZIP'; p[:zip] = true
-			when /^\d+$/; p[:delay] = e.to_i
+			when 'RC4'; c[:rc4] = true
+			when 'ZIP'; c[:zip] = true
+			when /^\d+$/; c[:delay] = e.to_i
 			when '', nil
 			else raise "C:host:[port]:pass:[RC4]:[ZIP]:[delay]"
 			end
