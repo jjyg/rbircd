@@ -11,7 +11,9 @@ module HasSock
 	attr_accessor :ircd, :fd
 
 	def send(*a)
-		@fd.write a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
+		msg = a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
+		puts "> #{msg}" if $DEBUG
+		@fd.write msg
 	end
 
 	# send() with ircd name prefixed
@@ -93,7 +95,9 @@ class User
 	end
 
 	def send(*a)
-		(fd || from_server.fd).write a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
+		msg = a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
+		puts "> #{msg}" if $DEBUG
+		(fd || from_server.fd).write msg
 	rescue
 		puts "#{Time.now} #{fqdn} #{$!} #{$!.message}"
 		cleanup ":#{fqdn} QUIT :Broken pipe" if fd
@@ -590,7 +594,9 @@ class Ircd
 			break if c == "\n"
 			l << c
 		end
-		l[0, maxlen]
+		l = l[0, maxlen].chomp
+		puts "< #{l}" if $DEBUG
+		l
 	end
 
 	# ":abc d e f :g h"  =>  [":abc", "d", "e", "f", "g h"]
