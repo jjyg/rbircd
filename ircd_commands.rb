@@ -78,6 +78,7 @@ class User
 				sv_send 404, @nick, l[1], ':Cannot send to channel' if send_err
 			end
 		elsif usr = @ircd.find_user(l[1]) and usr.kind_of?(User)
+			msg = ":#{@nick} #{l[0]} #{l[1]} :#{l[2]}" if not usr.local?
 			usr.send msg
 		else
 			sv_send 401, @nick, l[1], ':No such nick/channel' if send_err
@@ -218,7 +219,8 @@ class User
 					chan.topicwhen = Time.now.to_i
 				end
 
-				@ircd.send_chan(chan, ":#{fqdn} TOPIC #{channame} :#{l[2]}")
+				@ircd.servers.each { |s| s.send_topic(chan, self) } if chan.name[0] != ?&
+				@ircd.send_chan_local(chan, ":#{fqdn} TOPIC #{channame} :#{l[2]}")
 			end
 		else
 			# get topic
@@ -365,7 +367,7 @@ class User
 				end
 			when 'c', 'i', 'm', 'n', 'p', 's', 't'
 				if minus
-					chan.mode.delete m
+					chan.mode.delete! m
 				elsif not chan.mode.include?(m)
 					chan.mode << m
 				end
@@ -390,7 +392,8 @@ class User
 
 		if not done.empty?
 			donep = done_params.map { |p| ' ' + p }.join
-			@ircd.send_chan(chan, ":#{fqdn} MODE #{chan.name} :#{done}#{donep}")
+			@ircd.servers.each { |s| s.send_chanmode(self, chan, "#{done}#{donep}") } if chan.name[0] != ?&
+			@ircd.send_chan_local(chan, ":#{fqdn} MODE #{chan.name} :#{done}#{donep}")
 
 			"#{chan.name} #{done}#{donep}"	# return value, used by samode
 		end
@@ -442,7 +445,7 @@ class User
 			end
 
 			if minus and @mode.include? m
-				@mode.delete m
+				@mode.delete! m
 				done << '-' if done_sign != '-'
 				done_sign = '-'
 				done << m
@@ -498,14 +501,15 @@ class User
 	def cmd_list(l)
 		sv_send 321, @nick, 'Channel', ':Users'
 		(l[1] ? [@ircd.find_chan(l[1])].compact : @ircd.chans).each { |chan|
-			if !(chan.mode.include? 'p' or chan.mode.include? 's') or chan.users.include? self
-				sv_send 322, @nick, chan.name, chan.users.length, ':'
+			if !(chan.mode.include?('p') or chan.mode.include?('s')) or chan.users.include?(self) or @mode.include?('o')
+				sv_send 322, @nick, chan.name, chan.users.length, ":#{chan.topic}"
 			end
 		}
 		sv_send 323, @nick, ':End of /LIST command'
 	end
 
 	def cmd_away(l)
+		@ircd.send_servers ":#@nick AWAY :#{l[1]}"
 		if l[1] and not l[1].empty?
 			@away = l[1]
 			sv_send 306, @nick, ':You have been marked as away'
@@ -547,7 +551,7 @@ class User
 			fn ||= nick
 			if u = @ircd.find_user(nick)
 				sv_send 311, @nick, u.nick, u.ident, u.hostname, '*', ":#{u.descr}"
-				clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) }
+				clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or @mode.include?('o') }
 				clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
 				sv_send 319, @nick, u.nick, ":#{clist.join(' ')}" if not clist.empty?
 				sv_send 312, @nick, u.nick, u.servername, ":#{u.local? ? @ircd.descr : u.from_server.descr}"
@@ -582,10 +586,10 @@ class User
 		elsif chan.users.include?(u)
 			sv_send 443, @nick, nick, channame, ':is already on channel'
 		else
-			chan.invites << { :user => u, :who => fqdn, :when => Time.now.to_i }
-			msg = ":#{fqdn} INVITE #{nick} :#{channame}"
-			u.send msg if u.local?
-			@ircd.send_servers msg
+			chan.invites << { :user => u, :who => fqdn, :when => Time.now.to_i } if not chan.invites.find { |i| i[:user] == u }
+			msg = "INVITE #{nick} :#{channame}"
+			u.send ":#{fqdn} #{msg}" if u.local?
+			@ircd.send_servers "#@nick #{msg}"
 			cmd_notice ['NOTICE', "@#{channame}", "#{nick} invited #{u.nick} into channel #{channame}"]
 		end
 	end
@@ -628,6 +632,7 @@ class User
 		end
 
 		list = chan.users
+		list = [] if (chan.mode.include?('p') or chan.mode.include?('s')) and not chan.users.include?(self) and not @mode.include?('o')
 
 		conds.each { |cd|
 			arg = cd[2]
@@ -660,13 +665,22 @@ class User
 
 		list.each { |u|
 			flags = '' 
-			#flags << 'H'	# XXX
+			flags << 'H'	# XXX ?
 			flags << '+' if chan.voice?(u)
 			flags << '@' if chan.op?(u)
 			sv_send 352, @nick, channame, u.ident, u.hostname, u.servername, u.nick, flags, ":#{u.local? ? 0 : 1} #{u.descr}"
 		}
 
 		sv_send 315, @nick, l, ':End of /WHO command'
+	end
+
+	def cmd_links(l)
+		# TODO further
+		sv_send 364, @nick, @ircd.name, @ircd.name, ":0 #{@ircd.descr}"
+		@ircd.servers.each { |s|
+			sv_send 364, @nick, s.name, @ircd.name, ":1 #{s.descr}"
+		}
+		sv_send 356, @nick, '*', ':End of /LINKS command'
 	end
 
 	def cmd_wallops(l)
@@ -686,9 +700,10 @@ class User
 			next if not @ircd.match_mask(ol[:mask], fqdn)
 			next if not @ircd.check_oper_pass(pass, ol[:pass])
 
-			@ircd.send_global "#{fqdn} is not operator (O)"
+			@ircd.send_global "#{fqdn} is now operator (O)"
 			newmodes = (ol[:mode].split(//) - @mode.split(//)).join
 			if not newmodes.empty?
+				@mode << newmodes
 				msg = ":#{@nick} MODE #@nick :+#{newmodes}"
 				send msg
 				@ircd.send_servers msg
@@ -715,10 +730,11 @@ class User
 			sv_send 401, @nick, l[1], ':No such nick/channel'
 		else
 			reason = l[2] || @nick
+			@ircd.send_servers ":#@nick KILL #{l[1]} :irc!#{@ircd.name}!#{u.nick} (#{reason})"
 			if u.local?
 				u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILL by #@nick (#{reason}))"
+				u.cleanup ":#{fqdn} KILL #{l[1]} :irc!#{@ircd.name}!#{u.nick} (#{reason})"	# XXX path..
 			end
-			u.cleanup ":#{fqdn} KILL #{l[1]} :irc!#{@ircd.name}!#{u.nick} (#{reason})"	# XXX path..
 			@ircd.send_global "#@nick used KILL #{u.nick} (#{reason})"
 		end
 	end
@@ -734,7 +750,7 @@ class User
 	def cmd_rehash(l)
 		return if chk_oper(l)
 		sv_send 382, @nick, @ircd.conffile, ':Rehashing'
-		@ircd.global "#@nick is rehashing server config while whistling innocently"
+		@ircd.send_global "#@nick is rehashing server config while whistling innocently"
 		@ircd.rehash
 	end
 
@@ -772,15 +788,6 @@ class User
 		@ircd.global "#@nick SQUIT #{l[1]}"
 		serv.cleanup
 	end
-
-	def cmd_links(l)
-		# TODO further
-		sv_send 364, @nick, @ircd.name, @ircd.name, ":0 #{@ircd.descr}"
-		@ircd.servers.each { |s|
-			sv_send 364, @nick, s.name, @ircd.name, ":1 #{s.descr}"
-		}
-		sv_send 356, @nick, '*', ':End of /LINKS command'
-	end
 end
 
 class Server
@@ -792,7 +799,7 @@ class Server
 		elsif l[0] =~ /^\d+$/ and l[1] and u = @ircd.find_user(l[1])
 			# whois response etc
 			if u.local?
-				u.send unsplit(l, from)
+				u.send unsplit(l, from, true)
 			else
 				u.from_server.send unsplit(l, from)
 			end
@@ -818,6 +825,10 @@ class Server
 		else
 			send ":#{user.nick}", 'NICK', newnick
 		end
+	end
+
+	def send_chanmode(user, chan, model)
+		send ":#{user.nick} MODE #{chan.name} #{0} #{model}"
 	end
 
 	# send a client join channel notification
@@ -901,8 +912,12 @@ class Server
 	end
 
 	# attempt to rebuild the original message from the parsed array
-	def unsplit(l, from)
-		":#{from[1..-1]} #{l[0...-1].join(' ')} :#{l[-1]}"
+	def unsplit(l, from, sender_fqdn=false)
+		from = from[1..-1]
+		if sender_fqdn and u = @ircd.find_user(from)
+			from = u.fqdn
+		end
+		":#{from} #{l[0...-1].join(' ')} :#{l[-1]}"
 	end
 
 	# forward the message to other servers
@@ -924,6 +939,22 @@ class Server
 		if l[0] == '0'
 			# end of burst
 		end
+	end
+
+	def cmd_privmsg(l, from)
+		if c = @ircd.find_chan(l[1])
+			forward(l, from)
+			@ircd.send_chan_local(c, unsplit(l, from, true))
+		elsif u = @ircd.find_user(l[1])
+			if u.local?
+				u.send unsplit(l, from, true)
+			else
+				u.from_server.send unsplit(l, from)
+			end
+		end
+	end
+	def cmd_notice(l, from)
+		cmd_privmsg(l, from)
 	end
 
 	def cmd_nick(l, from)
@@ -1007,10 +1038,8 @@ class Server
 		if c = @ircd.find_chan(l[1])
 			ml = l[2..-1]
 			ts = ml.shift.to_i if @ts_delta
-			fu = from[1..-1]
-			fu = fu.fqdn if fu = @ircd.find_user(fu)
-			@ircd.send_chan_local(c, ":#{fu} MODE #{c.name} #{ml.join(' ')}")
-			do_mode_chan(c, ml, fu, ts)
+			@ircd.send_chan_local(c, unsplit(l[0, 2] + ml, from, true))
+			do_mode_chan(c, ml, from, ts)
 		elsif u = @ircd.find_user(l[1])
 			minus = false
 			l[2].split(//).each { |m|
@@ -1019,7 +1048,7 @@ class Server
 				when '-'; minus = true ; next
 				end
 				if minus
-					u.mode.delete m
+					u.mode.delete! m
 				elsif not u.mode.include?(m)
 					u.mode << m
 				end
@@ -1051,17 +1080,67 @@ class Server
 				if minus
 					list.delete_if { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(mask) }
 				elsif not list.find { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(mask) }
+					if who[0] == ?:
+						who = who[1..-1]
+						who = @ircd.find_user(who).fqdn if @ircd.find_user(who)
+					end
 					list << { :mask => mask, :who => who, :when => ts }
 				else next
 				end
 			else
 				if minus
-					c.mode.delete m
+					c.mode.delete! m
 				elsif not c.mode.include?(m)
 					c.mode << m
 				end
 			end
 		}
+	end
+
+	def cmd_part(l, from)
+		forward(l, from)
+		if c = @ircd.find_chan(l[1])
+			l[2] ||= ''
+			@ircd.send_chan_local(c, unsplit(l, from, true))
+			if u = @ircd.find_user(split_nih(from[1..-1])[0])
+				c.ops.delete u
+				c.voices.delete u
+				c.users.delete u
+				@ircd.del_chan c if c.users.empty?
+			end
+		end
+	end
+
+	def cmd_kick(l, from)
+		forward(l, from)
+		if chan = @ircd.find_chan(l[1]) and u = @ircd.find_user(l[2])
+			@ircd.send_chan_local(chan, unsplit(l, from, true))
+			chan.ops.delete u
+			chan.voices.delete u
+			chan.users.delete u
+			@ircd.del_chan chan if chan.users.empty?
+		end
+	end
+
+	def cmd_away(l, from)
+		forward(l, from)
+		if u = @ircd.find_user(split_nih(from[1..-1])[0])
+			if l[1] and not l[1].empty?
+				u.away = l[1]
+			else
+				u.away = nil
+			end
+		end
+	end
+
+	def cmd_invite(l, from)
+		forward(l, from)
+		if u = @ircd.find_user(l[1]) and c = @ircd.find_chan(l[2])
+			src = from[1..-1]
+			src = @ircd.find_user(src).fqdn if @ircd.find_user(src)
+			c.invites << { :user => u, :who => src, :when => Time.now.to_i } if not c.invites.find { |i| i[:user] == u }
+			u.send ":#{src} INVITE #{l[1]} :#{l[2]}" if u.local?
+		end
 	end
 
 	def cmd_topic(l, from)
@@ -1078,7 +1157,7 @@ class Server
 			else
 				c.topic = l[4]
 			end
-			@ircd.send_chan_local(":#{c.topicwho} TOPIC #{c.name} :#{c.topic}")
+			@ircd.send_chan_local(c, ":#{c.topicwho} TOPIC #{c.name} :#{c.topic}")
 		end
 	end
 
@@ -1103,7 +1182,7 @@ class Server
 
 		if u = @ircd.find_user(nick)
 			sv_send 311, ask, u.nick, u.ident, u.hostname, '*', ":#{u.descr}"
-			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) }
+			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or @mode.include?('o') }
 			clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
 			sv_send 319, ask, u.nick, ":#{clist.join(' ')}" if not clist.empty?
 			sv_send 312, ask, u.nick, u.servername, ":#{u.local? ? usr.ircd.descr : u.from_server.descr}"
@@ -1121,30 +1200,25 @@ class Server
 	def cmd_quit(l, from)
 		forward(l, from)
 		nick, user, host = split_nih(l[1])
-		if u = @ircd.find_user(nick)
-			fu = from[1..-1]
-			fu = fu.fqdn if fu = @ircd.find_user(fu)
-			@ircd.send_visible(u, ":#{fu} #{l.join(' ')}")
-			u.cleanup(l.join(' '))
+		if u = @ircd.find_user(nick) and u.local?
+			u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (#{l[0]} by #{from[1..-1]} (#{l[2]}))"
+			u.cleanup(unsplit(l, from, true), false)
 		end
 	end
+
 	def cmd_kill(l, from)
 		cmd_quit(l, from)
 	end
+
+	#cmd_squit
 
 	def cmd_gnotice(l, from)
 		forward(l, from)
 		@ircd.send_global_local(l[1])
 	end
-
-	#cmd_privmsg
-	#cmd_notice
-	#cmd_quit
-	#cmd_part
-	#cmd_kick
-	#cmd_mode
-	#cmd_topic
-	#cmd_oper
+	def cmd_globops(l, from)
+		cmd_gnotice(l, from)
+	end
 
 	def setup_cx
 		if @cline[:rc4] and @capab.to_a.include?('DKEY')

@@ -80,12 +80,15 @@ class User
 		end
 	end
 
-	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection")
+	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection", sendservers = true)
 		@ircd.user.delete_if { |k, v| v == self }
-		@ircd.send_visible(self, reason)
+		@ircd.send_servers(reason.sub(/^(:\S+)!\S*/, '\\1')) if sendservers
+		@ircd.send_visible_local(self, reason)
 		@ircd.clean_chans
-		fd.close rescue nil
-		fd.to_io.close rescue nil
+		if fd
+			@fd.close rescue nil
+			@fd.to_io.close rescue nil
+		end
 	end
 
 	def handle_line(l)
@@ -488,13 +491,6 @@ class Ircd
 	end
 
 	# send a message to all local users that have at least one chan in common with usr
-	# also send the message to all servers
-	def send_visible(usr, msg)
-		send_servers(msg)
-		send_visible_local(usr, msg)
-	end
-
-
 	def send_visible_local(usr, msg)
 		usrs = usr.chans.map { |c| c.users }.flatten.uniq - [usr]
 		(usrs & local_users).each { |u| u.send msg }
@@ -503,7 +499,7 @@ class Ircd
 	# send a message to all users of the chan
 	# also send the message to all servers unless the chan is local-only (&chan)
 	def send_chan(chan, msg)
-		send_servers(msg) if chan.name[0] != ?&
+		send_servers(msg.sub(/^(:\S*)!\S*/, '\\1')) if chan.name[0] != ?&
 		send_chan_local(chan, msg)
 	end
 
@@ -513,13 +509,13 @@ class Ircd
 
 	# same as send_chan, but dont send to usr (eg PRIVMSG etc)
 	def send_chan_butone(chan, usr, msg)
-		send_servers(msg) if chan.name[0] != ?&
+		send_servers(msg.sub(/^(:\S*)!\S*/, '\\1')) if chan.name[0] != ?&
 		chan.users.dup.each { |u| u.send msg if u != usr }
 	end
 
 	# same as send_chan restricted to chanops, but dont send to usr (eg PRIVMSG etc)
 	def send_chan_op_butone(chan, usr, msg)
-		send_servers(msg) if chan.name[0] != ?&
+		send_servers(msg.sub(/^(:\S*)!\S*/, '\\1')) if chan.name[0] != ?&
 		chan.ops.dup.each { |u| u.send msg if u != usr }
 	end
 
@@ -540,7 +536,7 @@ class Ircd
 	def send_global_local(msg)
 		local_users.find_all { |u|
 			u.mode.include? 'g' or u.mode.include? 'o'
-		}.each { |u| u.send ":#{name} NOTICE #{u.nick} :*** Global -- #{msg}" }
+		}.each { |u| u.sv_send 'NOTICE', u.nick, ':*** Global -- '+msg }
 	end
 
 
