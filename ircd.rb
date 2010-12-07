@@ -115,7 +115,7 @@ end
 class Server
 	include HasSock
 
-	attr_accessor :cline
+	attr_accessor :cline, :capab
 	attr_accessor :name, :descr
 	attr_accessor :last_ping, :last_pong
 
@@ -162,6 +162,14 @@ class Server
 			from = l.shift
 		end
 		handle_command(l, from)
+	end
+
+	# 1024bit strong prime from bahamut, reportedly from ipsec
+	def dkey_param_prime
+		0xF488FD584E49DBCD20B49DE49107366B336C380D451D0F7C88B31C7C5B2D8EF6F3C923C043F0A55B188D8EBB558CB85D38D334FD7C175743A31D186CDE33212CB52AFF3CE1B1294018118D7C84A70A72D686C40319C807297ACA950CD9969FABD00A509B0246D3083D66A45D419F9C7CBD894B221926BAABA25EC355E92F78C7
+	end
+	def dkey_param_generator
+		2
 	end
 end
 
@@ -257,7 +265,7 @@ class Pending
 		clt.mode << 'S' if @fromport.pline[:ssl]
 		@ircd.pending.delete self
 		@ircd.add_user clt
-		@ircd.send_servers "NICK #{clt.nick} 1 #{clt.ts} +#{clt.mode} #{clt.ident} #{clt.hostname} #{@ircd.name} 0 #{0x0} :#{clt.descr}"
+		@ircd.servers.each { |s| s.send_nick_full(clt) }
 		clt.send_welcome
 	end
 
@@ -323,31 +331,14 @@ class Pending
 			end
 		end
 
-		if @cline[:zip] and @capab.to_a.include?('ZIP')
-			send 'SVINFO', 'ZIP'
-			@fd = ZipIO.new(@fd)
-		elsif @cline[:rc4] and @capab.to_a.include?('DKEY')
-			send 'DKEY', 'START' # 'INIT'
-		else
-			finalize_server_conn
-		end
-	end
-
-	def finalize_server_conn
 		@ircd.pending.delete self
 		s = Server.new(ircd, @fd, @cline)
 		s.descr = @server[-1]
+		s.capab = @capab
 		@ircd.servers << s
+		s.setup_cx
 	end
 
-	# 1024bit strong prime from bahamut, reportedly from ipsec
-	def dkey_param_prime
-		0xF488FD584E49DBCD20B49DE49107366B336C380D451D0F7C88B31C7C5B2D8EF6F3C923C043F0A55B188D8EBB558CB85D38D334FD7C175743A31D186CDE33212CB52AFF3CE1B1294018118D7C84A70A72D686C40319C807297ACA950CD9969FABD00A509B0246D3083D66A45D419F9C7CBD894B221926BAABA25EC355E92F78C7
-	end
-	# actually not a generator of the group, meh.
-	def dkey_param_generator
-		2
-	end
 end
 
 # a channel
@@ -500,15 +491,24 @@ class Ircd
 	# also send the message to all servers
 	def send_visible(usr, msg)
 		send_servers(msg)
+		send_visible_local(usr, msg)
+	end
+
+
+	def send_visible_local(usr, msg)
 		usrs = usr.chans.map { |c| c.users }.flatten.uniq - [usr]
-		(usrs & local_users - [usr]).each { |u| u.send msg }
+		(usrs & local_users).each { |u| u.send msg }
 	end
 
 	# send a message to all users of the chan
 	# also send the message to all servers unless the chan is local-only (&chan)
 	def send_chan(chan, msg)
 		send_servers(msg) if chan.name[0] != ?&
-		chan.users.dup.each { |u| u.send msg }
+		send_chan_local(chan, msg)
+	end
+
+	def send_chan_local(chan, msg)
+		(chan.users & local_users).each { |u| u.send msg }
 	end
 
 	# same as send_chan, but dont send to usr (eg PRIVMSG etc)
@@ -533,7 +533,12 @@ class Ircd
 
 	# send as notice to all opers/+g users
 	def send_global(msg)
-		users.find_all { |u|
+		send_servers ":#{name} GNOTICE :#{msg}"
+		send_global_local(msg)
+	end
+
+	def send_global_local(msg)
+		local_users.find_all { |u|
 			u.mode.include? 'g' or u.mode.include? 'o'
 		}.each { |u| u.send ":#{name} NOTICE #{u.nick} :*** Global -- #{msg}" }
 	end
@@ -820,7 +825,7 @@ class Conf
 		while e = fu.shift
 			case e
 			when 'RC4'; c[:rc4] = true
-			when 'ZIP'; c[:zip] = true
+			#when 'ZIP'; c[:zip] = true	# XXX unsupported
 			when /^\d+$/; c[:delay] = e.to_i
 			when '', nil
 			else raise "C:host:[port]:pass:[RC4]:[ZIP]:[delay]"

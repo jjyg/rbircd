@@ -85,13 +85,11 @@ class DH
 		mod_exp(f, @x, @p)
 	end
 
-	# check that p is a strong prime, and that g is a generator
+	# check that p is a strong prime, and that g's order > 2
 	def self.validate(p, g)
 		raise 'DH: p not prime' if not miller_rabin(p)
 		raise 'DH: p not strong prime' if not miller_rabin((p-1)/2)
-		raise 'DH: bad generator 1' if mod_exp(g, 2, p) == 1
-		raise 'DH: bad generator 2' if mod_exp(g, (p-1)/2, p) == 1
-		raise 'DH: bad generator 3' if mod_exp(g, (p-1), p) != 1
+		raise 'DH: g bad generator' if mod_exp(g, 2, p) == 1
 	end
 
 	def self.test
@@ -159,6 +157,45 @@ class CryptoIo
 	end
 	def write(str)
 		@fd.write(@wr.encrypt(str))
+	end
+	def to_io
+		@fd.to_io
+	end
+end
+
+require 'zlib'
+class ZipIo
+	attr_accessor :ziprd, :zipwr, :fd
+
+	def initialize(fd, ziprd, zipwr)
+		@fd = fd
+		@ziprd = ziprd
+		@zipwr = zipwr
+		@r = Zlib::Inflate.new
+		@w = Zlib::Deflate.new
+		@bufrd = ''
+	end
+
+	def read(len)
+		if @ziprd
+			ret = ''
+			if not @bufrd.empty?
+				ret << @bufrd[0, len]
+				@bufrd[0, len] = ''
+				len -= ret.length
+			end
+			if len > 0
+				# FAIL
+				@bufrd += @r.inflate(@fd.read(len))
+			end
+		else
+			@fd.read(len)
+		end
+	end
+	def pending
+		not @bufrd.empty?
+	end
+	def write(str)
 	end
 	def to_io
 		@fd.to_io

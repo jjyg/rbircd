@@ -100,9 +100,10 @@ class User
 		elsif cn = chans.find { |c| (c.banned?(self) or c.mode.include?('m')) and not (c.op?(self) or c.voice?(self)) }
 			sv_send 437, @nick, cn.name, ':Cannot change nickname while banned or moderated on channel'
 		else
-			@ircd.send_visible(self, ":#{fqdn} NICK :#{nick}")
-			send ":#{fqdn} NICK :#{nick}"
 			@ts = Time.now.to_i
+			@ircd.servers.each { |s| s.send_nick(self, nick) }
+			@ircd.send_visible_local(self, ":#{fqdn} NICK :#{nick}")
+			send ":#{fqdn} NICK :#{nick}"
 			@ircd.del_user(self)
 			@nick = nick
 			@ircd.add_user(self)
@@ -151,8 +152,10 @@ class User
 				sv_send 475, @nick, channame, ':Cannot join chan (+k)'
 			else
 				chan.invites.delete inv if inv
+				# XXX chan.ts = Time.now.to_i
 				chan.users << self
-				@ircd.send_chan(chan, ":#{fqdn} JOIN :#{channame}")
+				@ircd.servers.each { |s| s.send_join(self, chan) } if channame[0] != ?&
+				@ircd.send_chan_local(chan, ":#{fqdn} JOIN :#{channame}")
 				cmd_topic ['TOPIC', channame] if chan.topic
 				cmd_names ['NAMES', channame]
 			end
@@ -165,7 +168,8 @@ class User
 				chan.users << self
 				chan.ops << self
 				@ircd.add_chan chan
-				@ircd.send_chan(chan, ":#{fqdn} JOIN :#{channame}")
+				@ircd.servers.each { |s| s.send_join(self, chan) } if channame[0] != ?&
+				@ircd.send_chan_local(chan, ":#{fqdn} JOIN :#{channame}")
 				cmd_names ['NAMES', channame]
 			end
 		end
@@ -320,7 +324,12 @@ class User
 					list.each { |b| sv_send 367, @nick, chan.name, b[:mask], b[:who], b[:when] }
 					sv_send 368, @nick, chan.name, ":End of channel #{m == 'b' ? 'ban' : 'except'} list"
 					next
-				elsif minus
+				end
+				parm = parm + '!*' if not parm.include?('!') and not parm.include?('@')
+				parm = '*!*' + parm if parm[0] == ?@ and not parm[1..-1].include?('@')
+				parm = '*!' + parm if not parm.include?('!')
+				parm = parm + '@*' if not parm.include?('@')
+				if minus
 					list.delete_if { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(parm) }
 				elsif not list.find { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(parm) }
 					list << { :mask => parm, :who => fqdn, :when => Time.now.to_i }
@@ -517,10 +526,14 @@ class User
 			srvname = l[1]
 			if srvname == @ircd.name
 			elsif srv = @ircd.servers.find { |s| s.name == srvname }
-				# TODO fwd to srv, return
+				srv.send ":#@nick", 'WHOIS', l[1], l[2]
+				return
 			elsif usr = @ircd.find_user(srvname)
-				srv = usr.from_server
-				# TODO fwd to srv, return
+				if not usr.local?
+					srv = usr.from_server
+					srv.send ":#@nick", 'WHOIS', l[1], l[2]
+					return
+				end
 			else
 				sv_send 402, @nick, srvname, ':No such server'
 				return
@@ -763,8 +776,8 @@ class User
 	def cmd_links(l)
 		# TODO further
 		sv_send 364, @nick, @ircd.name, @ircd.name, ":0 #{@ircd.descr}"
-		@ird.servers.each { |s|
-			sv_send 364, @nick, @ircd.name, s.name, ":1 #{s.descr}"
+		@ircd.servers.each { |s|
+			sv_send 364, @nick, s.name, @ircd.name, ":1 #{s.descr}"
 		}
 		sv_send 356, @nick, '*', ':End of /LINKS command'
 	end
@@ -776,9 +789,128 @@ class Server
 		if respond_to? msg
 			@last_pong = Time.now.to_f
 			__send__ msg, l, from
+		elsif l[0] =~ /^\d+$/ and l[1] and u = @ircd.find_user(l[1])
+			# whois response etc
+			if u.local?
+				u.send unsplit(l, from)
+			else
+				u.from_server.send unsplit(l, from)
+			end
 		else
 			puts "unhandled server #{l.inspect}"
 		end
+	end
+
+	# nick, user, host = split_nih("nico!tesla@volt.ru")
+	def split_nih(fqdn)
+		fqdn.split(/[!@]/)
+	end
+
+	# retrieve the TS shifted to match the peer delta
+	def cur_ts(time = Time.now.to_i)
+		Time.now.to_i - @ts_delta
+	end
+
+	# send nick change notification to peer - u = old user, ts = time of nick change
+	def send_nick(user, newnick)
+		if @ts_delta
+			send ":#{user.nick}", 'NICK', newnick, ":#{cur_ts(user.ts)}"
+		else
+			send ":#{user.nick}", 'NICK', newnick
+		end
+	end
+
+	# send a client join channel notification
+	def send_join(user, chan)
+		if @ts_delta
+			# XXX which ts ?
+			pfx = ''
+			pfx << '@' if chan.op?(user)
+			pfx << '+' if chan.voice?(user)
+			if pfx.empty?
+				send ":#{user.nick}", 'SJOIN', cur_ts(chan.ts), chan.name
+			else
+				sv_send 'SJOIN', cur_ts(chan.ts), chan.name, '+', ":#{pfx}#{user.nick}"
+			end
+		else
+			send ":#{user.nick}", 'JOIN', chan.name
+		end
+	end
+
+	def send_burst
+		send 'BURST'
+		@ircd.users.each { |u|
+			send_nick_full(u)
+		}
+		@ircd.chan.each { |c|
+			next if c.name[0] == ?&
+			send_chan_full(c)
+		}
+		@ircd.chan.each { |c|
+			c.bans.each { |b|
+			}
+		}
+		send 'PING', ":#{@ircd.name}"
+		send 'BURST', 0
+	end
+
+	def send_nick_full(u)
+		flags = 0	# XXX
+		sv_send "NICK #{u.nick} #{u.local? ? 1 : 2} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} 0 #{flags} :#{u.descr}"
+	end
+
+	def send_chan_full(c)
+		m = '+' + chan.mode
+		ma = []
+		if c.limit
+			m << 'l'
+			ma << c.limit
+		end
+		if c.key
+			m << 'k'
+			ma << c.key
+		end
+		ulist = []
+		c.users.each { |u|
+			pfx = ''
+			pfx << '@' if c.op?(u)
+			pfx << '+' if c.voice?(u)
+			ulist << "#{pfx}#{u.nick}"
+			if ulist.join(' ').length > 200
+				sv_send 'SJOIN', cur_ts(chan.ts), chan.name, "#{[m, ma].join(' ')}", ":#{pfx}#{user.nick}"
+				m, ma, ulist = '+', [], []
+			end
+		}
+		if not ulist.empty?
+			sv_send 'SJOIN', cur_ts(chan.ts), chan.name, "#{[m, ma].join(' ')}", ":#{pfx}#{user.nick}"
+		end
+	end
+
+	# send the chan topic/topicwho/topicwhen
+	def send_topic(chan, who=nil)
+		send ":#{who ? who.nick : @ircd.name}", 'TOPIC', split_nih(chan.topicwho)[0], chan.topicwhen, ":#{chan.topic}"
+	end
+
+	# retrieve a user, create it if it does not exist already
+	def may_create_user(nick)
+		if not u = @ircd.find_user(nick)
+			u = User.new(@ircd, nick, nil, nil, self)
+			@ircd.add_user u
+		end
+		u
+	end
+
+	# attempt to rebuild the original message from the parsed array
+	def unsplit(l, from)
+		":#{from[1..-1]} #{l[0...-1].join(' ')} :#{l[-1]}"
+	end
+
+	# forward the message to other servers
+	def forward(l, from)
+		@ircd.servers.each { |s|
+			next if s == self
+			s.send unsplit(l, from)
+		}
 	end
 
 	def cmd_ping(l, from)
@@ -788,9 +920,6 @@ class Server
 	def cmd_pong(l, from)
 	end
 
-	def cmd_svinfo(l, from)
-	end
-
 	def cmd_burst(l, from)
 		if l[0] == '0'
 			# end of burst
@@ -798,9 +927,12 @@ class Server
 	end
 
 	def cmd_nick(l, from)
+		forward(l, from)	# XXX check conflict/kill first
 		if l.length <= 3 # nick change
 			# :old NICK new :ts
-			if u = @ircd.find_user(from.sub(/!.*/, ''), '')
+			nick = from[1..-1]
+			if cf = @ircd.find_user(l[1]) and false
+			elsif u = @ircd.find_user(nick, '')
 				@ircd.del_user u
 				u.nick = l[1]
 				u.ts = l[2].to_i
@@ -809,7 +941,6 @@ class Server
 			else
 				u = User.new(@ircd, l[1], nil, nil, self)
 				u.ts = l[2].to_i
-				# TODO if u2 = @ircd.find_user(u.nick)
 				@ircd.add_user u
 			end
 		else # new nick
@@ -826,21 +957,16 @@ class Server
 		end
 	end
 
-	def may_create_user(nick)
-		if not u = @ircd.find_user(nick)
-			u = User.new(@ircd, nick, nil, nil, self)
-			@ircd.add_user u
-		end
-		u
-	end
-
 	def cmd_sjoin(l, from)
-		# :test.com SJOIN 1291679507 #bite + :@uu
-		# TODO TS
+		forward(l, from)
+		# :test.com SJOIN 1291679507 #bite +m :@uu
 		if not c = @ircd.find_chan(l[2])
 			c = Channel.new(@ircd, l[2])
+			c.ts = l[1].to_i
 			@ircd.add_chan c
+		# XXX else if c.ts conflict
 		end
+
 		if l.length > 3
 			mode = l[3]
 			modeargs = l[4...-1]
@@ -854,6 +980,7 @@ class Server
 				}
 			end
 		end
+
 		ulist = l[-1]
 		ulist.split.each { |nick|
 			if nick[0] == ?@
@@ -864,6 +991,10 @@ class Server
 				isvoice = true
 				nick = nick[1..-1]
 			end
+			if nick[0] == ?@
+				isop = true
+				nick = nick[1..-1]
+			end
 			u = may_create_user(nick)
 			c.users << u
 			c.voices << u if isvoice
@@ -871,16 +1002,218 @@ class Server
 		}
 	end
 
+	def cmd_mode(l, from)
+		forward(l, from)
+		if c = @ircd.find_chan(l[1])
+			ml = l[2..-1]
+			ts = ml.shift.to_i if @ts_delta
+			fu = from[1..-1]
+			fu = fu.fqdn if fu = @ircd.find_user(fu)
+			@ircd.send_chan_local(c, ":#{fu} MODE #{c.name} #{ml.join(' ')}")
+			do_mode_chan(c, ml, fu, ts)
+		elsif u = @ircd.find_user(l[1])
+			minus = false
+			l[2].split(//).each { |m|
+				case m
+				when '+'; minus = false; next
+				when '-'; minus = true ; next
+				end
+				if minus
+					u.mode.delete m
+				elsif not u.mode.include?(m)
+					u.mode << m
+				end
+			}
+		end
+	end
+
+	def do_mode_chan(c, margs, who, ts)
+		mode = margs.shift
+		minus = false
+		mode.split(//).each { |m|
+			case m
+			when '+'; minus = false
+			when '-'; minus = true
+			when 'o', 'v'
+				u = @ircd.find_user(margs.shift)
+				next if not c.users.include?(u)
+				list = (m == 'o' ? c.ops : c.voices)
+				if minus
+					list.delete u
+				elsif not list.include?(u)
+					list << u
+				end
+			when 'l'; c.limit = (minus ? nil : margs.shift.to_i) 
+			when 'k'; k = margs.shift; c.key = (minus ? nil : k)
+			when 'b', 'e'
+				list = (m == 'b' ? c.bans : c.banexcept)
+				mask = margs.shift
+				if minus
+					list.delete_if { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(mask) }
+				elsif not list.find { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(mask) }
+					list << { :mask => mask, :who => who, :when => ts }
+				else next
+				end
+			else
+				if minus
+					c.mode.delete m
+				elsif not c.mode.include?(m)
+					c.mode << m
+				end
+			end
+		}
+	end
+
+	def cmd_topic(l, from)
+		forward(l, from)
+		if c = @ircd.find_chan(l[1])
+			if u = @ircd.find_user(l[2])
+				c.topicwho = u.fqdn
+			else
+				c.topicwho = l[2]
+			end
+			c.topicwhen = l[3].to_i
+			if l[4].empty?
+				c.topic = nil
+			else
+				c.topic = l[4]
+			end
+			@ircd.send_chan_local(":#{c.topicwho} TOPIC #{c.name} :#{c.topic}")
+		end
+	end
+
+	def cmd_whois(l, from)
+		srvname = l[1]
+		nick = l[2]
+		if srvname == @ircd.name
+		elsif srv = @ircd.servers.find { |s| s.name == srvname }
+			srv.send unsplit(l, from)
+			return
+		elsif usr = @ircd.find_user(srvname)
+			if not usr.local?
+				usr.from_server.send unsplit(l, from)
+				return
+			end
+		else
+			forward(l, from)
+			return
+		end
+
+		ask = split_nih(from[1..-1])[0]
+
+		if u = @ircd.find_user(nick)
+			sv_send 311, ask, u.nick, u.ident, u.hostname, '*', ":#{u.descr}"
+			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) }
+			clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
+			sv_send 319, ask, u.nick, ":#{clist.join(' ')}" if not clist.empty?
+			sv_send 312, ask, u.nick, u.servername, ":#{u.local? ? usr.ircd.descr : u.from_server.descr}"
+			sv_send 301, ask, u.nick, ":#{u.away}" if u.away
+			sv_send 307, ask, u.nick, ':has identified for this nick' if false
+			sv_send 313, ask, u.nick, ':is an IRC Operator - Service Administrator' if u.mode.include?('o')
+			sv_send 275, ask, u.nick, ':is using a secure connection (SSL)' if u.mode.include?('S')
+			sv_send 317, ask, u.nick, (Time.now - u.last_active).to_i, u.connect_time.to_i, ':seconds idle, signon time' if u.local?
+		else
+			sv_send 401, ask, nick, ':No such nick/channel'
+		end
+		sv_send 318, ask, nick, ':End of /WHOIS command'
+	end
+
+	def cmd_quit(l, from)
+		forward(l, from)
+		nick, user, host = split_nih(l[1])
+		if u = @ircd.find_user(nick)
+			fu = from[1..-1]
+			fu = fu.fqdn if fu = @ircd.find_user(fu)
+			@ircd.send_visible(u, ":#{fu} #{l.join(' ')}")
+			u.cleanup(l.join(' '))
+		end
+	end
+	def cmd_kill(l, from)
+		cmd_quit(l, from)
+	end
+
+	def cmd_gnotice(l, from)
+		forward(l, from)
+		@ircd.send_global_local(l[1])
+	end
+
 	#cmd_privmsg
 	#cmd_notice
-	#cmd_join
-	#cmd_ping
 	#cmd_quit
 	#cmd_part
 	#cmd_kick
 	#cmd_mode
-	#cmd_oper
 	#cmd_topic
+	#cmd_oper
+
+	def setup_cx
+		if @cline[:rc4] and @capab.to_a.include?('DKEY')
+			send 'DKEY', 'START'
+		elsif @cline[:zip] and @capab.to_a.include?('ZIP')
+			send 'SVINFO', 'ZIP'
+		else
+			send_burst
+		end
+	end
+
+	def cmd_svinfo(l, from)
+		case l[1]
+		when 'ZIP'
+			send 'SVINFO', 'ZIP'
+			if @cline[:zip] and @capab.to_a.include?('ZIP')
+				# ruby-zlib is the sux !
+				#p Zlib::Inflate.inflate(@fd.read(4096))
+				# send_burst
+			else cleanup
+			end
+		when /^\d+/
+			@ts_delta = Time.now.to_i - l[-1].to_i
+		end
+	end
+
+	def cmd_dkey(l, from)
+		case l[1]
+		when 'START'
+			@dh_i = DH.new(dkey_param_prime, dkey_param_generator)
+			send 'DKEY', 'PUB', 'I', @dh_i.e.to_s(16)
+			@dh_o = DH.new(dkey_param_prime, dkey_param_generator)
+			send 'DKEY', 'PUB', 'O', @dh_o.e.to_s(16)
+			@dh_secret_o = @dh_secret_i = nil
+		when 'PUB'
+			num = l[3].to_i(16)
+			case l[2]
+			when 'I'; @dh_secret_o = @dh_o.secret(num)
+			when 'O'; @dh_secret_i = @dh_i.secret(num)
+			end
+			if @dh_secret_o and @dh_secret_i
+				puts "< DKEY EXIT" if $DEBUG
+				@fd.write "DKEY DONE\n"		# send 'DKEY', 'DONE' uses \r\n, remote side decodes \n with rc4 => fail
+				key_o = @dh_secret_o.to_s(16)
+				key_o = '0' + key_o if key_o.length & 1 == 1
+				key_o = [key_o].pack('H*')
+				@fd = CryptoIo.new(@fd, nil, RC4.new(key_o))
+			end
+		when 'DONE'
+			if not @dh_secret_o or not @dh_secret_i
+				send 'ERROR', ':nope'
+				cleanup
+				return
+			end
+			key_i = @dh_secret_i.to_s(16)
+			key_i = '0' + key_i if key_i.length & 1 == 1
+			key_i = [key_i].pack('H*')
+			@fd.rd = RC4.new(key_i)
+			send 'DKEY', 'EXIT'
+			@ircd.send_global "DH negociation successful with #{@cline[:name]}, connection encrypted"
+		when 'EXIT'
+			if @cline[:zip] and @capab.to_a.include?('ZIP')
+				# send 'SVINFO', 'ZIP'
+				# @fd = ZipIo.new(@fd, nil, true)
+			else
+				send_burst
+			end
+		end
+	end
 end
 
 class Pending
@@ -950,59 +1283,5 @@ class Pending
 		retrieve_ident(false)
 		@server = l
 		check_server_conn
-	end
-
-	def cmd_dkey(l)
-		if not @cline
-			send 'ERROR', ':nope'
-			cleanup
-			return
-		end
-
-		case l[1]
-		when 'START'
-			@dh_i = DH.new(dkey_param_prime, dkey_param_generator)
-			send 'DKEY', 'PUB', 'I', @dh_i.e.to_s(16)
-			@dh_o = DH.new(dkey_param_prime, dkey_param_generator)
-			send 'DKEY', 'PUB', 'O', @dh_o.e.to_s(16)
-			@dh_secret_o = @dh_secret_i = nil
-		when 'PUB'
-			num = l[3].to_i(16)
-			case l[2]
-			when 'I'; @dh_secret_o = @dh_o.secret(num)
-			when 'O'; @dh_secret_i = @dh_i.secret(num)
-			end
-			if @dh_secret_o and @dh_secret_i
-				send 'DKEY', 'DONE'
-				key_o = @dh_secret_o.to_s(16)
-				key_o = '0' + key_o if key_o.length & 1 == 1
-				key_o = [key_o].pack('H*')
-				@fd = CryptoIo.new(@fd, nil, RC4.new(key_o))
-			end
-		when 'DONE'
-			if not @dh_secret_o or not @dh_secret_i
-				send 'ERROR', ':nope'
-				cleanup
-				return
-			end
-			key_i = @dh_secret_i.to_s(16)
-			key_i = '0' + key_i if key_i.length & 1 == 1
-			key_i = [key_i].pack('H*')
-			@fd.rd = RC4.new(key_i)
-			@ircd.send_global "DH negociation successful with #{@cline[:name]}, connection encrypted"
-			send 'DKEY', 'EXIT'
-		when 'EXIT'
-			if not @dh_secret_o or not @dh_secret_i
-				send 'ERROR', ':nope'
-				cleanup
-				return
-			end
-			send 'PING', ":#{@ircd.name}"
-			#if zip
-			#dozip
-			#else
-			finalize_server_conn
-			#end
-		end
 	end
 end

@@ -28,7 +28,8 @@ P:127.0.0.1:7000:SSL
 P:[::1]:6667
 
 # link to other ircds
-C:some.server.name:1.2.3.4:7001:mypassw0rd:RC4:ZIP
+# ZIP not supported
+C:some.server.name:1.2.3.4:7001:mypassw0rd:RC4
 
 # operator identifier : mask : pass hash : user mode
 # use oper_mkpass.rb to generate the hash
