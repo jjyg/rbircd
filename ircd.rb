@@ -742,7 +742,7 @@ class Conf
 		File.read(filename).each_line { |l|
 			l = l.strip
 			case l[0]
-			when ?N; n, @name, @descr = l.split(':', 3)
+			when ?M; n, @name, @descr = l.split(':', 3)
 			when ?P; parse_p_line(l)
 			when ?C; parse_c_line(l)
 			when ?O; parse_o_line(l)

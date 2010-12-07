@@ -18,7 +18,7 @@ The server is controlled through a configuration file, here is a sample:
 
 ----- snip conf -----
 # the server name/description
-N:rb.ircd.net:my sexy server
+M:rb.ircd.net:my sexy server
 
 # listening ports
 P:127.0.0.1:6667
