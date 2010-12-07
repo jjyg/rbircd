@@ -71,22 +71,7 @@ class DH
 	def initialize(p, g)
 		@p = p
 		@g = g
-		validate
 		generate
-	end
-
-	# check that p is a strong prime, and that g is a generator
-	def validate
-		raise 'DH: p not prime' if not check_prime(@p)
-		raise 'DH: p not strong prime' if not check_prime((@p-1)/2)
-		raise 'DH: bad generator 1' if mod_exp(@g, 2, @p) == 1
-		raise 'DH: bad generator 2' if mod_exp(@g, (@p-1)/2, @p) == 1
-		raise 'DH: bad generator 3' if mod_exp(@g, (@p-1), @p) != 1
-	end
-
-	# returns true if n is prime
-	def check_prime(n)
-		miller_rabin(n)
 	end
 
 	# create a random secret & public nr
@@ -100,7 +85,17 @@ class DH
 		mod_exp(f, @x, @p)
 	end
 
+	# check that p is a strong prime, and that g is a generator
+	def self.validate(p, g)
+		raise 'DH: p not prime' if not miller_rabin(p)
+		raise 'DH: p not strong prime' if not miller_rabin((p-1)/2)
+		raise 'DH: bad generator 1' if mod_exp(g, 2, p) == 1
+		raise 'DH: bad generator 2' if mod_exp(g, (p-1)/2, p) == 1
+		raise 'DH: bad generator 3' if mod_exp(g, (p-1), p) != 1
+	end
+
 	def self.test
+		DH.validate(107, 2)
 		alice = DH.new(107, 2)
 		bob   = DH.new(107, 2)
 		raise if alice.secret(bob.e) != bob.secret(alice.e)
@@ -139,14 +134,24 @@ class RC4
 	end
 end
 
+class NullCipher
+	def encrypt(l)
+		l
+	end
+
+	def decrypt(l)
+		l
+	end
+end
+
 class CryptoIo
 	attr_accessor :rd, :wr, :fd
 	# usage: cryptsocket = CryptoIo.new(socket, RC4.new("foobar"), RC4.new("foobar"))
 	# can be chained, and passed to IO.select
 	def initialize(fd, cryptrd, cryptwr)
 		@fd = fd
-		@rd = cryptrd
-		@wr = cryptwr
+		@rd = cryptrd || NullCipher.new
+		@wr = cryptwr || NullCipher.new
 	end
 
 	def read(len)

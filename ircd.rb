@@ -12,7 +12,7 @@ module HasSock
 
 	def send(*a)
 		msg = a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
-		puts "> #{msg}" if $DEBUG
+		puts "< #{msg}" if $DEBUG
 		@fd.write msg
 	end
 
@@ -38,6 +38,7 @@ class User
 	attr_accessor :next_read_time
 	# reference to the Server that introduced this nick (nil if local)
 	attr_accessor :from_server
+	attr_accessor :ts
 
 	def initialize(ircd, nick, ident, hostname, fd=nil)
 		@ircd = ircd
@@ -96,7 +97,7 @@ class User
 
 	def send(*a)
 		msg = a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
-		puts "> #{msg}" if $DEBUG
+		puts "< #{msg}" if $DEBUG
 		(fd || from_server.fd).write msg
 	rescue
 		puts "#{Time.now} #{fqdn} #{$!} #{$!.message}"
@@ -116,47 +117,30 @@ class Server
 
 	attr_accessor :cline
 	attr_accessor :name, :descr
+	attr_accessor :last_ping, :last_pong
 
 	def initialize(ircd, fd, cline)
 		@ircd = ircd
 		@fd = fd
 		@cline = cline
+		@name = cline[:name]
+		@last_ping = @last_pong = Time.now.to_f
 	end
 
-	def self.sconnect(ircd, fd, cline)
-		sv = new(ircd, fd, cline)
-		sv.sconnect
-		sv
+	def self.sconnect(ircd, cline)
+		ircd.send_global("Routing - connection from #{ircd.name} to #{cline[:name]} activated")
+		p = Timeout.timeout(4, RuntimeError) {
+			Pending.new(ircd, TCPSocket.open(cline[:host], cline[:port]))
+		}
+		p.sconnect(cline)
+		ircd.pending << p
 	rescue
+		ircd.send_global "Routing - connection to #{cline[:name]} refused (#{$!.message})"
 		puts "#{Time.now} #{$!} #{$!.message}", $!.backtrace, ''
 	end
 
-	def sconnect
-		send 'PASS', cline[:pass]
-		send 'CAPAB', 'SSJOIN', 'NOQUIT', 'NICKIP', "TSMODE#{' DKEY' if @cline[:rc4]}#{' ZIP' if @cline[:zip]}"
-		send 'SERVER', @ircd.name, ':ircd.rb'
-		if @cline[:zip]
-			# drain fd ?
-			send 'SVINFO', 'ZIP'
-			@fd = ZipIO.new(@fd)
-		end
-		if @cline[:rc4]
-			sconnect_rc4
-		end
-	end
-
-	def sconnect_rc4
-		send 'DKEY INIT'
-		loop do
-			l = @ircd.fd_gets(@fd)
-			break if l.to_s == ''
-			p l
-		end
-		raise	# TODO
-	end
-
 	def can_read
-		if not l = @ircd.fd_gets(@fd)
+		if not l = @ircd.fd_gets(@fd, 4096)
 			cleanup
 		else
 			handle_line(@ircd.split_line(l))
@@ -228,18 +212,20 @@ class Pending
 	include HasSock
 
 	attr_accessor :rmtaddr, :fromport
-	attr_accessor :pass, :user, :nick
+	attr_accessor :pass, :user, :nick, :capab, :cline
 	attr_accessor :ident, :hostname
 	attr_accessor :last_pong
 
-	def initialize(ircd, fd, rmtaddr, fromport)
+	def initialize(ircd, fd, rmtaddr=nil, fromport=nil)
 		@ircd = ircd
 		@fd = fd
 		@rmtaddr = rmtaddr
 		@fromport = fromport
 		@pass = @user = @nick = nil
-		@ident = @hostname = nil
+		@ident = nil
+		@hostname = '0.0.0.0'
 		@last_pong = Time.now.to_f
+		@cline = nil
 	end
 
 	def can_read
@@ -251,7 +237,7 @@ class Pending
 	end
 
 	def cleanup
-		@ircd.user.delete @nick
+		@ircd.del_user self if @nick
 		@ircd.pending.delete self
 		@fd.close rescue nil
 		@fd.to_io.close rescue nil
@@ -262,34 +248,34 @@ class Pending
 		handle_command(l)
 	end
 
+	# check if a client connection has completed
 	def check_conn
 		return if not @user or not @nick
-		wait_hostname
-		wait_ident
 		clt = User.new(@ircd, @nick, @ident || "~#{@user[1]}", @hostname, @fd)
 		clt.descr = @user[4]
+		clt.ts = Time.now.to_i
 		clt.mode << 'S' if @fromport.pline[:ssl]
 		@ircd.pending.delete self
-		@ircd.user[@nick.downcase] = clt
+		@ircd.add_user clt
+		@ircd.send_servers "NICK #{clt.nick} 1 #{clt.ts} +#{clt.mode} #{clt.ident} #{clt.hostname} #{@ircd.name} 0 #{0x0} :#{clt.descr}"
 		clt.send_welcome
 	end
 
 	# TODO async dns/ident
-	def retrieve_hostname
-		@hostname = '0.0.0.0'
-		sv_send 'NOTICE', 'AUTH', ':*** Looking up your hostname...'
+	def retrieve_hostname(verb=true)
+		sv_send 'NOTICE', 'AUTH', ':*** Looking up your hostname...' if verb
 		pa = @fd.to_io.peeraddr
 		@hostname = pa[3]
 		Timeout.timeout(2, RuntimeError) {
 			@hostname = Socket.gethostbyaddr(@hostname.split('.').map { |i| i.to_i }.pack('C*'))[0]
 		}
-		sv_send 'NOTICE', 'AUTH', ':*** Found your hostname'
+		sv_send 'NOTICE', 'AUTH', ':*** Found your hostname' if verb
 	rescue
-		sv_send 'NOTICE', 'AUTH', ':*** Couldn\'t look up your hostname'
+		sv_send 'NOTICE', 'AUTH', ':*** Couldn\'t look up your hostname' if verb
 	end
 
-	def retrieve_ident
-		sv_send 'NOTICE', 'AUTH', ':*** Checking Ident'
+	def retrieve_ident(verb=true)
+		sv_send 'NOTICE', 'AUTH', ':*** Checking Ident' if verb
 		Timeout.timeout(2, RuntimeError) {
 			pa = @fd.to_io.peeraddr
 			la = @fd.to_io.addr
@@ -299,15 +285,68 @@ class Pending
 			}.chomp.split(':')
 			@ident = ans[3] if ans[1] == 'USERID'
 		}
-		sv_send 'NOTICE', 'AUTH', ':*** Got Ident response'
+		sv_send 'NOTICE', 'AUTH', ':*** Got Ident response' if verb
 	rescue
-		sv_send 'NOTICE', 'AUTH', ':*** No Ident response', $!.class.name, $!.message
+		sv_send 'NOTICE', 'AUTH', ':*** No Ident response', $!.class.name, $!.message if verb
 	end
 
-	def wait_hostname
+	def sconnect(cline)
+		@cline = cline
+
+		send 'PASS', @cline[:pass], ':TS'
+		send 'CAPAB', 'SSJOIN', 'NOQUIT', 'NICKIP', 'BURST', 'TS3', "TSMODE#{' DKEY' if @cline[:rc4]}#{' ZIP' if @cline[:zip]}"
+		send 'SERVER', @ircd.name, ":#{@ircd.descr}"
+		send 'SVINFO', 3, 3, 0, ":#{Time.now.to_i}"
 	end
 
-	def wait_ident
+	def check_server_conn
+		if not @cline
+			cline = @ircd.conf.clines.find { |c|
+				c[:pass] == @pass and
+				@ircd.downcase(c[:name]) == @ircd.downcase(@server[1]) and
+				@ircd.match_mask(c[:host], @hostname)
+			}
+			if not cline
+				@ircd.send_global "Link #@ident!#@hostname dropped (No C-line)"
+				send 'ERROR', ":Closing Link: #@ident!#@hostname (No C-line)"
+				cleanup
+				return
+			end
+
+			sconnect cline
+		else
+			if @cline[:pass] != @pass or @ircd.downcase(@cline[:name]) != @ircd.downcase(@server[1])
+				@ircd.send_global "Link #@ident!#@hostname dropped (No C-line)"
+				send 'ERROR', ":Closing Link: #@ident!#@hostname (No C-line)"
+				cleanup
+				return
+			end
+		end
+
+		if @cline[:zip] and @capab.to_a.include?('ZIP')
+			send 'SVINFO', 'ZIP'
+			@fd = ZipIO.new(@fd)
+		elsif @cline[:rc4] and @capab.to_a.include?('DKEY')
+			send 'DKEY', 'START' # 'INIT'
+		else
+			finalize_server_conn
+		end
+	end
+
+	def finalize_server_conn
+		@ircd.pending.delete self
+		s = Server.new(ircd, @fd, @cline)
+		s.descr = @server[-1]
+		@ircd.servers << s
+	end
+
+	# 1024bit strong prime from bahamut, reportedly from ipsec
+	def dkey_param_prime
+		0xF488FD584E49DBCD20B49DE49107366B336C380D451D0F7C88B31C7C5B2D8EF6F3C923C043F0A55B188D8EBB558CB85D38D334FD7C175743A31D186CDE33212CB52AFF3CE1B1294018118D7C84A70A72D686C40319C807297ACA950CD9969FABD00A509B0246D3083D66A45D419F9C7CBD894B221926BAABA25EC355E92F78C7
+	end
+	# actually not a generator of the group, meh.
+	def dkey_param_generator
+		2
 	end
 end
 
@@ -325,6 +364,7 @@ class Channel
 	attr_accessor :bans, :banexcept
 	# same as ban masks, with :user instead of :mask (=> User)
 	attr_accessor :invites
+	attr_accessor :ts
 
 	def initialize(ircd, name)
 		@ircd = ircd
@@ -521,10 +561,7 @@ class Ircd
 		@conf.clines.each { |c|
 			next if not c[:port]
 			next if @servers.find { |s| s.cline == c }
-			fd = TCPSocket.open(c[:host], c[:port])
-			if sv = Server.sconnect(self, fd, c)
-				@servers << sv
-			end
+			Server.sconnect(self, c)
 		}
 		# opers will squit servers no longer needed
 	end
@@ -542,9 +579,19 @@ class Ircd
 		@last_tnow ||= tnow
 		return if @last_tnow > tnow - 0.4
 		@last_tnow = tnow
+
 		servers.dup.each { |s|
-			# TODO
+			if s.last_pong < tnow - (@conf.ping_timeout / 2 + 10)
+				s.send 'ERROR', ":Closing Link: (Ping timeout)"
+				s.cleanup
+				next
+			end
+			if s.last_ping < tnow - @conf.ping_timeout / 2
+				s.send 'PING', ":#{name}"
+				s.last_ping = tnow
+			end
 		}
+
 		local_users.dup.each { |u|
 			if u.last_pong < tnow - @conf.ping_timeout
 				u.send 'ERROR', ":Closing Link: #{u.hostname} (Ping timeout)"
@@ -556,8 +603,12 @@ class Ircd
 				u.last_ping = tnow
 			end
 		}
+
 		pending.dup.each { |p|
 			if p.last_pong < tnow - @conf.ping_timeout / 2
+				if p.cline
+					send_global "No response from #{p.cline[:name]} (#{p.cline[:host]}), closing link"
+				end
 				p.send 'ERROR', ':Closing Link: 0.0.0.0 (Ping timeout)'
 				p.cleanup
 				next
@@ -595,7 +646,7 @@ class Ircd
 			l << c
 		end
 		l = l[0, maxlen].chomp
-		puts "< #{l}" if $DEBUG
+		puts "> #{l}" if $DEBUG
 		l
 	end
 
@@ -661,7 +712,7 @@ class Conf
 	attr_accessor :plines
 	# list of { :nick => 'lol' (OPER command param), :mask => '*!blabla@*', :pass => '123$1azde2', :mode => 'oOaARD' }
 	attr_accessor :olines
-	# list of { :host => '1.2.3.4', :port => 42, :pass => 'secret', :rc4 => true, :zip => true }
+	# list of { :name => 'bob.com', :host => '1.2.3.4', :port => 42, :pass => 'secret', :rc4 => true, :zip => true }
 	attr_accessor :clines
 
 	attr_accessor :ping_timeout
@@ -749,12 +800,13 @@ class Conf
 		@plines << p
 	end
 
-	# C:127.0.0.1:7001:RC4:ZIP:1200	# active connection from us, delay = 1200s
-	# C:127.0.0.2::RC4		# passive cx (listen only)
+	# C:bob.srv.com:127.0.0.1:7001:RC4:ZIP:240	# active connection from us, delay = 240s
+	# C:danny.ircd:127.0.0.2::RC4		# passive cx (listen only)
 	def parse_c_line(l)
 		c = {}
 		fu = split_ipv6(l)
 		fu.shift	# 'C'
+		c[:name] = fu.shift
 		c[:host] = fu.shift
 		c[:port] = fu.shift.to_i
 		c[:pass] = fu.shift
@@ -762,7 +814,7 @@ class Conf
 		if c[:port] == 0
 			c.delete :port
 		else
-			c[:delay] = 1200
+			c[:delay] = 240
 		end
 
 		while e = fu.shift

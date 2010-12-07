@@ -1,8 +1,8 @@
 class User
 	def handle_command(l)
-		@last_pong = Time.now.to_f
 		msg = "cmd_#{l[0].to_s.downcase}"
 		if respond_to? msg
+			@last_pong = Time.now.to_f
 			__send__ msg, l
 		else
 			puts "unhandled user #{fqdn} #{l.inspect}"
@@ -102,6 +102,7 @@ class User
 		else
 			@ircd.send_visible(self, ":#{fqdn} NICK :#{nick}")
 			send ":#{fqdn} NICK :#{nick}"
+			@ts = Time.now.to_i
 			@ircd.del_user(self)
 			@nick = nick
 			@ircd.add_user(self)
@@ -160,6 +161,7 @@ class User
 				sv_send 405, @nick, channame, ':You have joined too many channels'
 			else
 				chan = Channel.new(@ircd, channame)
+				chan.ts = Time.now.to_i
 				chan.users << self
 				chan.ops << self
 				@ircd.add_chan chan
@@ -716,23 +718,162 @@ class User
 		end
 	end
 
-	#cmd_squit
+	def cmd_rehash(l)
+		return if chk_oper(l)
+		sv_send 382, @nick, @ircd.conffile, ':Rehashing'
+		@ircd.global "#@nick is rehashing server config while whistling innocently"
+		@ircd.rehash
+	end
+
+	def cmd_connect(l)
+		return if chk_oper(l)
+		return if chk_parm(l, 1)
+
+		n = @ircd.downcase(l[1])
+		cline = @ircd.clines.find { |c| [c[:name], c[:host], "#{c[:host]}:#{c[:port]}"].find { |ce| @ircd.downcase(ce) == n } }
+		if not cline
+			sv_send 'NOTICE', @nick, ":No C-line for #{l[1]}"
+			return
+		end
+
+		if l[2]
+			cline = cline.dup
+			h, p = @icrd.conf.split_ipv6(l[2])
+			cline[:host] = h
+			cline[:port] = p if p
+		end
+		Server.sconnect(@ircd, cline)
+	end
+
+	def cmd_squit(l)
+		return if chk_oper(l)
+		return if chk_param(l, 1)
+
+		# TODO remote squit
+		serv = @ircd.servers.find { |s| @ircd.downcase(s.name) == @ircd.downcase(l[1]) }
+		if not serv
+			sv_send 'NOTICE', @nick, ":No such server #{l[1]}"
+			return
+		end
+
+		@ircd.global "#@nick SQUIT #{l[1]}"
+		serv.cleanup
+	end
+
+	def cmd_links(l)
+		# TODO further
+		sv_send 364, @nick, @ircd.name, @ircd.name, ":0 #{@ircd.descr}"
+		@ird.servers.each { |s|
+			sv_send 364, @nick, @ircd.name, s.name, ":1 #{s.descr}"
+		}
+		sv_send 356, @nick, '*', ':End of /LINKS command'
+	end
 end
 
 class Server
 	def handle_command(l, from)
 		msg = "cmd_#{l[0].to_s.downcase}"
 		if respond_to? msg
-			__send__ msg, l
+			@last_pong = Time.now.to_f
+			__send__ msg, l, from
 		else
 			puts "unhandled server #{l.inspect}"
 		end
 	end
 
+	def cmd_ping(l, from)
+		sv_send 'PONG', @ircd.name, ":#{l[1]}"
+	end
+
+	def cmd_pong(l, from)
+	end
+
+	def cmd_svinfo(l, from)
+	end
+
+	def cmd_burst(l, from)
+		if l[0] == '0'
+			# end of burst
+		end
+	end
+
+	def cmd_nick(l, from)
+		if l.length <= 3 # nick change
+			# :old NICK new :ts
+			if u = @ircd.find_user(from.sub(/!.*/, ''), '')
+				@ircd.del_user u
+				u.nick = l[1]
+				u.ts = l[2].to_i
+				# TODO if u2 = @ircd.find_user(u.nick), kill some
+				@ircd.add_user u
+			else
+				u = User.new(@ircd, l[1], nil, nil, self)
+				u.ts = l[2].to_i
+				# TODO if u2 = @ircd.find_user(u.nick)
+				@ircd.add_user u
+			end
+		else # new nick
+			# NICK mynick 1 1291672480 +oiwh myident myhost mysrv 0 2130706433 :mydescr
+			if u = @ircd.find_user(l[1])
+				# TODO kill
+			else
+				u = User.new(@ircd, l[1], l[5], l[6], self)
+				u.descr = l[10]
+				u.ts = l[3].to_i
+				u.mode = l[4][1..-1] if l[4][0] == ?+
+				@ircd.add_user u
+			end
+		end
+	end
+
+	def may_create_user(nick)
+		if not u = @ircd.find_user(nick)
+			u = User.new(@ircd, nick, nil, nil, self)
+			@ircd.add_user u
+		end
+		u
+	end
+
+	def cmd_sjoin(l, from)
+		# :test.com SJOIN 1291679507 #bite + :@uu
+		# TODO TS
+		if not c = @ircd.find_chan(l[2])
+			c = Channel.new(@ircd, l[2])
+			@ircd.add_chan c
+		end
+		if l.length > 3
+			mode = l[3]
+			modeargs = l[4...-1]
+			if mode[0] == ?+
+				mode[1..-1].split(//).each { |m|
+					case m
+					when 'l'; c.limit = modeargs.shift.to_i
+					when 'k'; c.key = modeargs.shift
+					end
+					c.mode << m
+				}
+			end
+		end
+		ulist = l[-1]
+		ulist.split.each { |nick|
+			if nick[0] == ?@
+				isop = true
+				nick = nick[1..-1]
+			end
+			if nick[0] == ?+
+				isvoice = true
+				nick = nick[1..-1]
+			end
+			u = may_create_user(nick)
+			c.users << u
+			c.voices << u if isvoice
+			c.ops << u if isop
+		}
+	end
+
 	#cmd_privmsg
 	#cmd_notice
 	#cmd_join
-	#cmd_nick
 	#cmd_ping
 	#cmd_quit
 	#cmd_part
@@ -760,7 +901,7 @@ class Pending
 			sv_send 461, @nick, 'USER', ':Not enough parameters'
 		else
 			@user = l
-			if not @hostname
+			if @hostname == '0.0.0.0'
 				retrieve_hostname
 				retrieve_ident
 			end
@@ -792,5 +933,76 @@ class Pending
 		cleanup
 	end
 
-	#cmd_server
+	def cmd_error(l)
+		cleanup
+	end
+	
+	def cmd_notice(l)
+		# other server checking our ident
+	end
+
+	def cmd_capab(l)
+		@capab = l
+	end
+
+	def cmd_server(l)
+		retrieve_hostname(false)
+		retrieve_ident(false)
+		@server = l
+		check_server_conn
+	end
+
+	def cmd_dkey(l)
+		if not @cline
+			send 'ERROR', ':nope'
+			cleanup
+			return
+		end
+
+		case l[1]
+		when 'START'
+			@dh_i = DH.new(dkey_param_prime, dkey_param_generator)
+			send 'DKEY', 'PUB', 'I', @dh_i.e.to_s(16)
+			@dh_o = DH.new(dkey_param_prime, dkey_param_generator)
+			send 'DKEY', 'PUB', 'O', @dh_o.e.to_s(16)
+			@dh_secret_o = @dh_secret_i = nil
+		when 'PUB'
+			num = l[3].to_i(16)
+			case l[2]
+			when 'I'; @dh_secret_o = @dh_o.secret(num)
+			when 'O'; @dh_secret_i = @dh_i.secret(num)
+			end
+			if @dh_secret_o and @dh_secret_i
+				send 'DKEY', 'DONE'
+				key_o = @dh_secret_o.to_s(16)
+				key_o = '0' + key_o if key_o.length & 1 == 1
+				key_o = [key_o].pack('H*')
+				@fd = CryptoIo.new(@fd, nil, RC4.new(key_o))
+			end
+		when 'DONE'
+			if not @dh_secret_o or not @dh_secret_i
+				send 'ERROR', ':nope'
+				cleanup
+				return
+			end
+			key_i = @dh_secret_i.to_s(16)
+			key_i = '0' + key_i if key_i.length & 1 == 1
+			key_i = [key_i].pack('H*')
+			@fd.rd = RC4.new(key_i)
+			@ircd.send_global "DH negociation successful with #{@cline[:name]}, connection encrypted"
+			send 'DKEY', 'EXIT'
+		when 'EXIT'
+			if not @dh_secret_o or not @dh_secret_i
+				send 'ERROR', ':nope'
+				cleanup
+				return
+			end
+			send 'PING', ":#{@ircd.name}"
+			#if zip
+			#dozip
+			#else
+			finalize_server_conn
+			#end
+		end
+	end
 end
