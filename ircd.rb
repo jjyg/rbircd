@@ -27,7 +27,7 @@ class User
 	include HasSock
 
 	attr_accessor :nick, :ident, :hostname, :descr
-	attr_accessor :mode
+	attr_accessor :mode, :mode_d
 	attr_accessor :away
 	attr_accessor :connect_time
 	# Time.to_f of the last message sent from the user (whois idle)
@@ -527,16 +527,22 @@ class Ircd
 		}.each { |u| u.send msg }
 	end
 
+	# send as notice to all opers/+g users, related to irc routing
+	def send_gnotice(msg)
+		send_servers ":#{name} GNOTICE :#{msg}"
+		send_global_local(msg, 'Routing')
+	end
+
 	# send as notice to all opers/+g users
 	def send_global(msg)
-		send_servers ":#{name} GNOTICE :#{msg}"
+		send_servers ":#{name} GLOBOPS :#{msg}"
 		send_global_local(msg)
 	end
 
-	def send_global_local(msg)
+	def send_global_local(msg, qual='Global')
 		local_users.find_all { |u|
 			u.mode.include? 'g' or u.mode.include? 'o'
-		}.each { |u| u.sv_send 'NOTICE', u.nick, ':*** Global -- '+msg }
+		}.each { |u| u.sv_send 'NOTICE', u.nick, ":*** #{qual} -- #{msg}" }
 	end
 
 

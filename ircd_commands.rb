@@ -365,6 +365,8 @@ class User
 				elsif not list.include?(u)
 					list << u
 				end
+			when 'r'	# registered - not user-set
+				next
 			when 'c', 'i', 'm', 'n', 'p', 's', 't'
 				if minus
 					chan.mode.delete! m
@@ -431,12 +433,22 @@ class User
 				# i invisible - no effects
 				# g global - receive global notices
 				# w wallops - receive wallops notices
-			when 'o', 'O'	# oper modes - can set only if oper
+			when 'o'
 				# o globop - operator
-				# O locop - same as o
-				next if not minus and not @mode.include? 'o'
-			when 'S'	# frozen modes
+				next if not minus
+				if @mode.include? 'a'
+					# -o implies -a
+					@mode.delete! 'a'
+					done << '-' if done_sign != '-'
+					done_sign = '-'
+					done << 'a'
+				end
+			when 'a'
+				next if not minus
+			when 'S', 'r', 'd'	# frozen modes
 				# S connected through SSL
+				# r nickserv registered
+				# d (arg) timeout until nickchange for nicksteal?
 				next
 			else
 				sv_send 501, @nick, ':Unknown MODE flag' if not did_warn_invalid
@@ -963,7 +975,7 @@ class Server
 			# :old NICK new :ts
 			nick = from[1..-1]
 			if cf = @ircd.find_user(l[1]) and false
-			elsif u = @ircd.find_user(nick, '')
+			elsif u = @ircd.find_user(nick)
 				@ircd.del_user u
 				u.nick = l[1]
 				u.ts = l[2].to_i
@@ -1199,32 +1211,38 @@ class Server
 
 	def cmd_quit(l, from)
 		forward(l, from)
-		nick, user, host = split_nih(l[1])
+		nick, user, host = split_nih(from[1..-1])
 		if u = @ircd.find_user(nick) and u.local?
-			u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (#{l[0]} by #{from[1..-1]} (#{l[2]}))"
+			u.send "ERROR :Closing Link: #{u.host} (Quit: #{l[1]})"
 			u.cleanup(unsplit(l, from, true), false)
 		end
 	end
 
 	def cmd_kill(l, from)
-		cmd_quit(l, from)
+		forward(l, from)
+		nick, user, host = split_nih(l[1])
+		if u = @ircd.find_user(nick) and u.local?
+			u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILLED by #{from[1..-1]} (#{l[2]}))"
+			u.cleanup(unsplit(l, from, true), false)
+		end
 	end
-
-	#cmd_squit
 
 	def cmd_gnotice(l, from)
 		forward(l, from)
-		@ircd.send_global_local(l[1])
+		@ircd.send_global_local(l[1], 'Routing')
 	end
+
 	def cmd_globops(l, from)
-		cmd_gnotice(l, from)
+		forward(l, from)
+		@ircd.send_global_local(l[1])
 	end
 
 	def setup_cx
 		if @cline[:rc4] and @capab.to_a.include?('DKEY')
 			send 'DKEY', 'START'
 		elsif @cline[:zip] and @capab.to_a.include?('ZIP')
-			send 'SVINFO', 'ZIP'
+			#send 'SVINFO', 'ZIP'
+			#@fd = writezip(@fd)
 		else
 			send_burst
 		end
@@ -1238,8 +1256,8 @@ class Server
 				# ruby-zlib is the sux !
 				#p Zlib::Inflate.inflate(@fd.read(4096))
 				# send_burst
-			else cleanup
 			end
+			cleanup
 		when /^\d+/
 			@ts_delta = Time.now.to_i - l[-1].to_i
 		end
@@ -1278,7 +1296,7 @@ class Server
 			key_i = [key_i].pack('H*')
 			@fd.rd = RC4.new(key_i)
 			send 'DKEY', 'EXIT'
-			@ircd.send_global "DH negociation successful with #{@cline[:name]}, connection encrypted"
+			@ircd.send_gnotice "DH negociation successful with #{@cline[:name]}, connection encrypted"
 		when 'EXIT'
 			if @cline[:zip] and @capab.to_a.include?('ZIP')
 				# send 'SVINFO', 'ZIP'
@@ -1286,6 +1304,34 @@ class Server
 			else
 				send_burst
 			end
+		end
+	end
+
+	def cmd_svsmode(l, from)
+		forward(l, from)
+		if u = @ircd.find_user(l[1])
+			ts = l[2]
+			mode = l[3]
+			args = l[4..-1]
+			mode.split(//).each { |m|
+				case m
+				when '+'; minus = false
+				when '-'; minus = true
+				when 'd'
+					darg = args.shift
+					if minus
+						u.mode_d = nil
+					else
+						u.mode_d = darg.to_i
+					end
+				else
+					if minus
+						u.mode.delete! m
+					elsif not u.mode.include?(m)
+						u.mode << m
+					end
+				end
+			}
 		end
 	end
 end

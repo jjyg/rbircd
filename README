@@ -33,7 +33,7 @@ C:some.server.name:1.2.3.4:7001:mypassw0rd:RC4
 
 # operator identifier : mask : pass hash : user mode
 # use oper_mkpass.rb to generate the hash
-O:jj:*!bla@trusted.computing.lulz:1234$5678:oO
+O:jj:*!bla@trusted.computing.lulz:1234$5678:oa
 ----- snip -----
 
 More specific tweaks should be done in the source itself, especially the Conf class (holds ping timeout delays, ssl cert/key paths, etc)
