@@ -510,13 +510,13 @@ class Ircd
 	# same as send_chan, but dont send to usr (eg PRIVMSG etc)
 	def send_chan_butone(chan, usr, msg)
 		send_servers(msg.sub(/^(:\S*)!\S*/, '\\1')) if chan.name[0] != ?&
-		chan.users.dup.each { |u| u.send msg if u != usr }
+		(chan.users & local_users).each { |u| u.send msg if u != usr }
 	end
 
 	# same as send_chan restricted to chanops, but dont send to usr (eg PRIVMSG etc)
 	def send_chan_op_butone(chan, usr, msg)
 		send_servers(msg.sub(/^(:\S*)!\S*/, '\\1')) if chan.name[0] != ?&
-		chan.ops.dup.each { |u| u.send msg if u != usr }
+		(chan.ops & local_users).each { |u| u.send msg if u != usr }
 	end
 
 	# send to all servers + +w users
