@@ -39,6 +39,7 @@ class User
 	# reference to the Server that introduced this nick (nil if local)
 	attr_accessor :from_server
 	attr_accessor :ts
+	attr_accessor :servername, :serverdescr
 
 	def initialize(ircd, nick, ident, hostname, fd=nil)
 		@ircd = ircd
@@ -60,8 +61,10 @@ class User
 		not from_server
 	end
 
-	def servername
-		local? ? @ircd.name : @from_server.name
+	def serverhops
+		(!from_server) ? 1 :
+		@from_server.name == @servername ? 2 :
+		@from_server.servers.find { |s| s[:name] == @servername }[:hops]
 	end
 
 	def chans
@@ -121,6 +124,8 @@ class Server
 	attr_accessor :cline, :capab
 	attr_accessor :name, :descr
 	attr_accessor :last_ping, :last_pong
+	# remote servers behind this connection, :name, :hops, :descr
+	attr_accessor :servers
 
 	def initialize(ircd, fd, cline)
 		@ircd = ircd
@@ -128,6 +133,7 @@ class Server
 		@cline = cline
 		@name = cline[:name]
 		@last_ping = @last_pong = Time.now.to_f
+		@servers = []
 	end
 
 	def self.sconnect(ircd, cline)
@@ -263,6 +269,8 @@ class Pending
 	def check_conn
 		return if not @user or not @nick
 		clt = User.new(@ircd, @nick, @ident || "~#{@user[1]}", @hostname, @fd)
+		clt.servername = @ircd.name
+		clt.serverdescr = @ircd.descr
 		clt.descr = @user[4]
 		clt.ts = Time.now.to_i
 		clt.mode << 'S' if @fromport.pline[:ssl]
@@ -663,7 +671,7 @@ class Ircd
 		lsplit = l.split
 		return [] if lsplit.empty?
 		if last = lsplit[1..-1].find { |e| e[0] == ?: }
-			lsplit = l.split(/\s+/, lsplit.index(last)+1)
+			lsplit = l.split(/\s+/, lsplit[1..-1].index(last)+2)
 			lsplit[-1] = lsplit[-1][1..-1]
 		end
 		lsplit

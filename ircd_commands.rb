@@ -541,7 +541,7 @@ class User
 			nicklist = l[2]
 			srvname = l[1]
 			if srvname == @ircd.name
-			elsif srv = @ircd.servers.find { |s| s.name == srvname }
+			elsif srv = @ircd.servers.find { |s| s.name == srvname or s.servers.find { |ss| ss[:name] == srvname } }
 				srv.send ":#@nick", 'WHOIS', l[1], l[2]
 				return
 			elsif usr = @ircd.find_user(srvname)
@@ -563,15 +563,15 @@ class User
 			fn ||= nick
 			if u = @ircd.find_user(nick)
 				sv_send 311, @nick, u.nick, u.ident, u.hostname, '*', ":#{u.descr}"
+				sv_send 275, @nick, u.nick, ':is using a secure connection (SSL)' if u.mode.include?('S')
+				sv_send 301, @nick, u.nick, ":#{u.away}" if u.away
+				sv_send 307, @nick, u.nick, ':has identified for this nick' if u.mode.include?('r')
+				sv_send 312, @nick, u.nick, u.servername, ":#{u.serverdescr}"
+				sv_send 313, @nick, u.nick, ':is an IRC Operator - Service Administrator' if u.mode.include?('o')
+				sv_send 317, @nick, u.nick, (Time.now - u.last_active).to_i, u.connect_time.to_i, ':seconds idle, signon time' if u.local?
 				clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or @mode.include?('o') }
 				clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
 				sv_send 319, @nick, u.nick, ":#{clist.join(' ')}" if not clist.empty?
-				sv_send 312, @nick, u.nick, u.servername, ":#{u.local? ? @ircd.descr : u.from_server.descr}"
-				sv_send 301, @nick, u.nick, ":#{u.away}" if u.away
-				sv_send 307, @nick, u.nick, ':has identified for this nick' if false
-				sv_send 313, @nick, u.nick, ':is an IRC Operator - Service Administrator' if u.mode.include?('o')
-				sv_send 275, @nick, u.nick, ':is using a secure connection (SSL)' if u.mode.include?('S')
-				sv_send 317, @nick, u.nick, (Time.now - u.last_active).to_i, u.connect_time.to_i, ':seconds idle, signon time' if u.local?
 			else
 				sv_send 401, @nick, nick, ':No such nick/channel'
 			end
@@ -862,6 +862,13 @@ class Server
 
 	def send_burst
 		send 'BURST'
+		@ircd.servers.each { |s|
+			next if s == self
+			sv_send 'SERVER', s.name, 2, ":#{s.descr}"
+			s.servers.each { |ss|
+				sv_send 'SERVER', ss[:name], ss[:hops]+1, ":#{ss[:descr]}"
+			}
+		}
 		@ircd.users.each { |u|
 			send_nick_full(u)
 		}
@@ -879,7 +886,7 @@ class Server
 
 	def send_nick_full(u)
 		flags = 0	# XXX
-		sv_send "NICK #{u.nick} #{u.local? ? 1 : 2} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} 0 #{flags} :#{u.descr}"
+		sv_send "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} 0 #{flags} :#{u.descr}"
 	end
 
 	def send_chan_full(c)
@@ -925,11 +932,11 @@ class Server
 
 	# attempt to rebuild the original message from the parsed array
 	def unsplit(l, from, sender_fqdn=false)
-		from = from[1..-1]
-		if sender_fqdn and u = @ircd.find_user(from)
+		from = from[1..-1] if from
+		if from and sender_fqdn and u = @ircd.find_user(from)
 			from = u.fqdn
 		end
-		":#{from} #{l[0...-1].join(' ')} :#{l[-1]}"
+		"#{':'+from if from} #{l[0...-1].join(' ')} :#{l[-1]}"
 	end
 
 	# forward the message to other servers
@@ -953,6 +960,12 @@ class Server
 		end
 	end
 
+	def cmd_server(l, from)
+		@servers << { :name => l[1], :hops => l[2].to_i, :descr => l[3] }
+		l[2] = l[2].to_i+1
+		forward l, from
+	end
+
 	def cmd_privmsg(l, from)
 		if c = @ircd.find_chan(l[1])
 			forward(l, from)
@@ -970,6 +983,7 @@ class Server
 	end
 
 	def cmd_nick(l, from)
+		l[2] = l[2].to_i + 1 if l[2] =~ /^\d+$/	# hops
 		forward(l, from)	# XXX check conflict/kill first
 		if l.length <= 3 # nick change
 			# :old NICK new :ts
@@ -987,14 +1001,18 @@ class Server
 				@ircd.add_user u
 			end
 		else # new nick
-			# NICK mynick 1 1291672480 +oiwh myident myhost mysrv 0 2130706433 :mydescr
+			# NICK mynick hops ts +oiwh myident myhost mysrv 0 2130706433 :mydescr
 			if u = @ircd.find_user(l[1])
 				# TODO kill
+				puts "conflict, should KILL #{l[1]}"
 			else
 				u = User.new(@ircd, l[1], l[5], l[6], self)
-				u.descr = l[10]
 				u.ts = l[3].to_i
 				u.mode = l[4][1..-1] if l[4][0] == ?+
+				u.descr = l[10]
+				u.servername = l[7]
+				u.serverdescr = ((s = @ircd.servers.find { |s| s.name == u.servername }) ? s.descr : nil)
+				u.serverdescr ||= ((s = @ircd.servers.map { |s| s.servers }.flatten.find { |s| s[:name] == u.servername }) ? s[:descr] : nil)
 				@ircd.add_user u
 			end
 		end
