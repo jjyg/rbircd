@@ -687,10 +687,12 @@ class User
 	end
 
 	def cmd_links(l)
-		# TODO further
 		sv_send 364, @nick, @ircd.name, @ircd.name, ":0 #{@ircd.descr}"
 		@ircd.servers.each { |s|
 			sv_send 364, @nick, s.name, @ircd.name, ":1 #{s.descr}"
+			s.servers.each { |ss|
+				sv_send 364, @nick, ss[:name], s.name, ":#{ss[:hops]} #{ss[:descr]}"
+			}
 		}
 		sv_send 356, @nick, '*', ':End of /LINKS command'
 	end
