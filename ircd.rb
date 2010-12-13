@@ -696,12 +696,12 @@ class Ircd
 	end
 
 	def self.run(conffile='conf', logfile=nil)
-		ircd = new(conffile)
-		ircd.startup
 		if logfile
 			$stdout.reopen File.open(logfile, 'a')
 			$stderr.reopen $stdout
 		end
+		ircd = new(conffile)
+		ircd.startup
 		trap('HUP') { ircd.rehash }
 		ircd.main_loop
 	end
