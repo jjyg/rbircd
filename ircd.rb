@@ -695,15 +695,19 @@ class Ircd
 		md5_a == hash_a
 	end
 
-	def self.run(conffile='conf')
+	def self.run(conffile='conf', logfile=nil)
 		ircd = new(conffile)
 		ircd.startup
+		if logfile
+			$stdout.reopen File.open(logfile, 'a')
+			$stderr.reopen $stdout
+		end
 		trap('HUP') { ircd.rehash }
 		ircd.main_loop
 	end
 
 	def self.run_bg(conffile='conf', logfile='log')
-		File.open(logfile, 'a') {}
+		log = File.open(logfile, 'a')
 		ircd = new(conffile)	# abort now if there is an error in the conf
 		ircd.startup
 		if pid = Process.fork
@@ -711,7 +715,7 @@ class Ircd
 			return
 		end
 
-		$stdout.reopen File.open(logfile, 'a')
+		$stdout.reopen log
 		$stderr.reopen $stdout
 		trap('HUP') { ircd.rehash }
 		ircd.main_loop

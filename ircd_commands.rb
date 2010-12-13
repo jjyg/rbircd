@@ -701,6 +701,13 @@ class User
 		@ircd.send_wallops(":#{fqdn} WALLOPS :#{l[1]}")
 	end
 
+	def cmd_nickserv(l)
+		cmd_privmsg ['PRIVMSG', l[0], l[1]]
+	end
+	alias cmd_chanserv cmd_nickserv
+	alias cmd_operserv cmd_nickserv
+	alias cmd_memoserv cmd_nickserv
+
 	def cmd_oper(l)
 		return if chk_parm(l, 2)
 
