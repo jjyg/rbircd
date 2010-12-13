@@ -1050,6 +1050,7 @@ class Server
 		end
 
 		ulist = l[-1]
+		send_mode = []
 		ulist.split.each { |nick|
 			if nick[0] == ?@
 				isop = true
@@ -1067,7 +1068,22 @@ class Server
 			c.users << u
 			c.voices << u if isvoice
 			c.ops << u if isop
+			@ircd.send_chan_local(":#{u.fqdn} JOIN #{c.name}")
+			send_mode << ['v', u.nick] if isvoice
+			send_mode << ['o', u.nick] if isop
 		}
+		curm = ''
+		cura = []
+		send_mode.each { |m, a|
+			curm << m
+			cura << a
+			if cura.length > 10
+				@ircd.send_chan_local(":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}")
+				curm = ''
+				cura = []
+			end
+		}
+		@ircd.send_chan_local(":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}") if not cura.empty?
 	end
 
 	def cmd_mode(l, from)
