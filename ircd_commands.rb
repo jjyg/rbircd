@@ -395,7 +395,7 @@ class User
 		if not done.empty?
 			donep = done_params.map { |p| ' ' + p }.join
 			@ircd.servers.each { |s| s.send_chanmode(self, chan, "#{done}#{donep}") } if chan.name[0] != ?&
-			@ircd.send_chan_local(chan, ":#{fqdn} MODE #{chan.name} :#{done}#{donep}")
+			@ircd.send_chan_local(chan, ":#{fqdn} MODE #{chan.name} #{done}#{donep}")
 
 			"#{chan.name} #{done}#{donep}"	# return value, used by samode
 		end
@@ -706,6 +706,9 @@ class User
 	def cmd_nickserv(l)
 		cmd_privmsg ['PRIVMSG', l[0], l[1]]
 	end
+	def cmd_identify(l)
+		cmd_privmsg ['PRIVMSG', 'nickserv', l.join(' ')]
+	end
 	alias cmd_chanserv cmd_nickserv
 	alias cmd_operserv cmd_nickserv
 	alias cmd_memoserv cmd_nickserv
@@ -945,7 +948,7 @@ class Server
 		if from and sender_fqdn and u = @ircd.find_user(from)
 			from = u.fqdn
 		end
-		"#{':'+from if from} #{l[0...-1].join(' ')} :#{l[-1]}"
+		"#{':'+from if from} #{l[0...-1].join(' ')} #{':' if l[-1] =~ /\s/}#{l[-1]}"
 	end
 
 	# forward the message to other servers
@@ -1070,7 +1073,7 @@ class Server
 			c.users << u
 			c.voices << u if isvoice
 			c.ops << u if isop
-			@ircd.send_chan_local(":#{u.fqdn} JOIN #{c.name}")
+			@ircd.send_chan_local(c, ":#{u.fqdn} JOIN #{c.name}")
 			send_mode << ['v', u.nick] if isvoice
 			send_mode << ['o', u.nick] if isop
 		}
@@ -1080,12 +1083,12 @@ class Server
 			curm << m
 			cura << a
 			if cura.length > 10
-				@ircd.send_chan_local(":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}")
+				@ircd.send_chan_local(c, ":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}")
 				curm = ''
 				cura = []
 			end
 		}
-		@ircd.send_chan_local(":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}") if not cura.empty?
+		@ircd.send_chan_local(c, ":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}") if not cura.empty?
 	end
 
 	def cmd_mode(l, from)
@@ -1256,7 +1259,7 @@ class Server
 		forward(l, from)
 		nick, user, host = split_nih(from[1..-1])
 		if u = @ircd.find_user(nick) and u.local?
-			u.send "ERROR :Closing Link: #{u.host} (Quit: #{l[1]})"
+			u.send "ERROR :Closing Link: #{u.hostname} (Quit: #{l[1]})"
 			u.cleanup(unsplit(l, from, true), false)
 		end
 	end
