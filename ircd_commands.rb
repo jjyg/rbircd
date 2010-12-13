@@ -712,6 +712,12 @@ class User
 	alias cmd_chanserv cmd_nickserv
 	alias cmd_operserv cmd_nickserv
 	alias cmd_memoserv cmd_nickserv
+	def cmd_ns(l)
+		cmd_privmsg ['PRIVMSG', 'nickserv', l[1..-1].join(' ')]
+	end
+	def cmd_cs(l)
+		cmd_privmsg ['PRIVMSG', 'chanserv', l[1..-1].join(' ')]
+	end
 
 	def cmd_oper(l)
 		return if chk_parm(l, 2)
@@ -754,11 +760,10 @@ class User
 			sv_send 401, @nick, l[1], ':No such nick/channel'
 		else
 			reason = l[2] || @nick
-			@ircd.send_servers ":#@nick KILL #{l[1]} :irc!#{@ircd.name}!#{u.nick} (#{reason})"
 			if u.local?
 				u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILL by #@nick (#{reason}))"
-				u.cleanup ":#{fqdn} KILL #{l[1]} :irc!#{@ircd.name}!#{u.nick} (#{reason})"	# XXX path..
 			end
+			u.cleanup ":#{fqdn} KILL #{l[1]} :irc!#{@ircd.name}!#{u.nick} (#{reason})"	# XXX path..
 			@ircd.send_global "#@nick used KILL #{u.nick} (#{reason})"
 		end
 	end
@@ -828,7 +833,7 @@ class Server
 				u.from_server.send unsplit(l, from)
 			end
 		else
-			puts "unhandled server #{l.inspect}"
+			puts "unhandled server #{l.inspect} #{from.inspect}"
 		end
 	end
 
@@ -1000,16 +1005,20 @@ class Server
 		if l.length <= 3 # nick change
 			# :old NICK new :ts
 			nick = from[1..-1]
-			if cf = @ircd.find_user(l[1]) and false
+			newnick = l[1]
+			ts = l[2].to_i
+			if cf = @ircd.find_user(newnick) and false
 			elsif u = @ircd.find_user(nick)
+				oldfqdn = u.fqdn
 				@ircd.del_user u
-				u.nick = l[1]
-				u.ts = l[2].to_i
+				u.nick = newnick
+				u.ts = ts
 				# TODO if u2 = @ircd.find_user(u.nick), kill some
 				@ircd.add_user u
+				@ircd.send_visible_local(u, ":#{oldfqdn} NICK #{newnick}")
 			else
-				u = User.new(@ircd, l[1], nil, nil, self)
-				u.ts = l[2].to_i
+				u = User.new(@ircd, newnick, nil, nil, self)
+				u.ts = ts
 				@ircd.add_user u
 			end
 		else # new nick
@@ -1032,7 +1041,6 @@ class Server
 
 	def cmd_sjoin(l, from)
 		forward(l, from)
-		# :test.com SJOIN 1291679507 #bite +m :@uu
 		if not c = @ircd.find_chan(l[2])
 			c = Channel.new(@ircd, l[2])
 			c.ts = l[1].to_i
@@ -1041,6 +1049,7 @@ class Server
 		end
 
 		if l.length > 3
+		# :test.com SJOIN 1291679507 #bite +m :@uu
 			mode = l[3]
 			modeargs = l[4...-1]
 			if mode[0] == ?+
@@ -1052,9 +1061,12 @@ class Server
 					c.mode << m
 				}
 			end
+			ulist = l[-1]
+		else
+		# :user SJOIN 0 #chan
+			ulist = from[1..-1]
 		end
 
-		ulist = l[-1]
 		send_mode = []
 		ulist.split.each { |nick|
 			if nick[0] == ?@
@@ -1258,8 +1270,10 @@ class Server
 	def cmd_quit(l, from)
 		forward(l, from)
 		nick, user, host = split_nih(from[1..-1])
-		if u = @ircd.find_user(nick) and u.local?
-			u.send "ERROR :Closing Link: #{u.hostname} (Quit: #{l[1]})"
+		if u = @ircd.find_user(nick)
+			if u.local?
+				u.send "ERROR :Closing Link: #{u.hostname} (Quit: #{l[1]})"
+			end
 			u.cleanup(unsplit(l, from, true), false)
 		end
 	end
@@ -1267,8 +1281,10 @@ class Server
 	def cmd_kill(l, from)
 		forward(l, from)
 		nick, user, host = split_nih(l[1])
-		if u = @ircd.find_user(nick) and u.local?
-			u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILLED by #{from[1..-1]} (#{l[2]}))"
+		if u = @ircd.find_user(nick)
+			if u.local?
+				u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILLED by #{from[1..-1]} (#{l[2]}))"
+			end
 			u.cleanup(unsplit(l, from, true), false)
 		end
 	end
@@ -1378,6 +1394,26 @@ class Server
 					end
 				end
 			}
+		end
+	end
+
+	def cmd_svsnick(l, from)
+		# :nickserv@service SVSNICK Someone Unregistered_user_42 1232334343
+		forward(l, from)
+		nick = l[1]
+		newnick = l[2]
+		ts = l[3].to_i
+		if cf = @ircd.find_user(newnick) and false
+		elsif u = @ircd.find_user(nick)
+			@ircd.del_user u
+			u.nick = newnick
+			u.ts = ts
+			@ircd.add_user u
+		else
+			puts "svs nickchange from unknown user #{l.inspect} #{from.inspect}"
+			u = User.new(@ircd, newnick, nil, nil, self)
+			u.ts = ts
+			@ircd.add_user u
 		end
 	end
 end
