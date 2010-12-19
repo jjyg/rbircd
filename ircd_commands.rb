@@ -901,8 +901,16 @@ class Server
 			send_chan_full(c)
 		}
 		@ircd.chans.each { |c|
+			next if c.name[0] == ?&
+			send_topic(c)
 			c.bans.each { |b|
+				# TODO
 			}
+		}
+		@ircd.users.each { |u|
+			next if not u.away
+			next if u.from_server == self
+			send "#{u.nick} AWAY :#{u.away}"
 		}
 		send 'PING', ":#{@ircd.name}"
 		send 'BURST', 0
@@ -942,7 +950,7 @@ class Server
 
 	# send the chan topic/topicwho/topicwhen
 	def send_topic(chan, who=nil)
-		send ":#{who ? who.nick : @ircd.name}", 'TOPIC', split_nih(chan.topicwho)[0], chan.topicwhen, ":#{chan.topic}"
+		send ":#{who ? who.nick : @ircd.name}", 'TOPIC', chan.name, split_nih(chan.topicwho)[0], chan.topicwhen, ":#{chan.topic}"
 	end
 
 	# retrieve a user, create it if it does not exist already

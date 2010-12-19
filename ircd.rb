@@ -610,7 +610,7 @@ class Ircd
 		}
 
 		@clines_timeout.each { |ct|
-			c = ct.cline
+			c = ct[:cline]
 			next if not c[:port]
 			next if @servers.find { |s| s.cline == c }
 			next if ct[:last_try_sconnect] > tnow - c[:delay]
