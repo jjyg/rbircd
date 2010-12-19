@@ -783,6 +783,13 @@ class User
 		@ircd.rehash
 	end
 
+	def cmd_die(l)
+		return if chk_oper(l)
+		@ircd.send_global "#@nick killed me !"
+		puts "DIE by #{@fqdn}"
+		exit!(0)
+	end
+
 	def cmd_connect(l)
 		return if chk_oper(l)
 		return if chk_parm(l, 1)

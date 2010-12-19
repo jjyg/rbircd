@@ -160,7 +160,7 @@ class Server
 		@ircd.servers.delete self
 		oldu = @ircd.users.find_all { |u| u.from_server == self }
 		oldu.each { |u| @ircd.user.delete u.nick }
-		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :srv1 srv2" }
+		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :#{name} #{@ircd.name}" }
 		@ircd.notice_opers("closing cx to server #{@cline[:host]}")
 		@fd.to_io.close rescue nil
 	end
@@ -607,6 +607,14 @@ class Ircd
 			end
 		}
 
+		@conf.clines.each { |c|
+			next if not c[:port]
+			next if @servers.find { |s| s.cline == c }
+			next if c[:last_try_connect].to_f > tnow - c[:delay]
+			c[:last_try_connect] = tnow
+			Server.sconnect(self, c)
+		}
+
 		local_users.dup.each { |u|
 			if u.last_pong < tnow - @conf.ping_timeout
 				u.send 'ERROR', ":Closing Link: #{u.hostname} (Ping timeout)"
@@ -829,6 +837,7 @@ class Conf
 		c[:host] = fu.shift
 		c[:port] = fu.shift.to_i
 		c[:pass] = fu.shift
+		c[:last_try_connect] = Time.now.to_f if c[:port]
 
 		if c[:port] == 0
 			c.delete :port
