@@ -896,11 +896,11 @@ class Server
 		@ircd.users.each { |u|
 			send_nick_full(u)
 		}
-		@ircd.chan.each { |c|
+		@ircd.chans.each { |c|
 			next if c.name[0] == ?&
 			send_chan_full(c)
 		}
-		@ircd.chan.each { |c|
+		@ircd.chans.each { |c|
 			c.bans.each { |b|
 			}
 		}
