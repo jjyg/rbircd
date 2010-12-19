@@ -418,6 +418,7 @@ class Ircd
 		@conf = Conf.new
 		@conffile = conffile
 		@conf.load(@conffile) if @conffile
+		@clines_timeout = @conf.clines.map { |c| { :last_try_sconnect => Time.now.to_f, :cline => c } if c[:port] }.compact if @conffile
 	end
 
 	def name
@@ -434,6 +435,7 @@ class Ircd
 		conf = Conf.new	# reload the configuration
 		conf.load(@conffile)
 		@conf = conf	# this allows conf.load to fail/raise without impacting the existing @conf
+		@clines_timeout = @conf.clines.map { |c| { :last_try_sconnect => Time.now.to_f, :cline => c } if c[:port] }.compact
 		startup		# apply conf changes (ports/clines/olines)
 	end
 
@@ -607,11 +609,12 @@ class Ircd
 			end
 		}
 
-		@conf.clines.each { |c|
+		@clines_timeout.each { |ct|
+			c = ct.cline
 			next if not c[:port]
 			next if @servers.find { |s| s.cline == c }
-			next if c[:last_try_connect].to_f > tnow - c[:delay]
-			c[:last_try_connect] = tnow
+			next if ct[:last_try_sconnect] > tnow - c[:delay]
+			ct[:last_try_sconnect] = tnow
 			Server.sconnect(self, c)
 		}
 
@@ -837,7 +840,6 @@ class Conf
 		c[:host] = fu.shift
 		c[:port] = fu.shift.to_i
 		c[:pass] = fu.shift
-		c[:last_try_connect] = Time.now.to_f if c[:port]
 
 		if c[:port] == 0
 			c.delete :port
