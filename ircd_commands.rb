@@ -968,7 +968,7 @@ class Server
 		if from and sender_fqdn and u = @ircd.find_user(from)
 			from = u.fqdn
 		end
-		"#{':'+from if from} #{l[0...-1].join(' ')} #{':' if l[-1] =~ /\s/}#{l[-1]}"
+		"#{':'+from if from} #{l[0...-1].join(' ')} #{':' if l[-1] =~ /\s|^:/}#{l[-1]}"
 	end
 
 	# forward the message to other servers
