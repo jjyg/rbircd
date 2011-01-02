@@ -159,7 +159,7 @@ class Server
 	def cleanup
 		@ircd.servers.delete self
 		oldu = @ircd.users.find_all { |u| u.from_server == self }
-		oldu.each { |u| @ircd.user.delete u.nick }
+		oldu.each { |u| @ircd.del_user u }
 		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :#{name} #{@ircd.name}" }
 		@ircd.notice_opers("closing cx to server #{@cline[:host]}")
 		@fd.to_io.close rescue nil
@@ -599,7 +599,7 @@ class Ircd
 
 		servers.dup.each { |s|
 			if s.last_pong < tnow - (@conf.ping_timeout / 2 + 10)
-				s.send 'ERROR', ":Closing Link: (Ping timeout)"
+				s.send 'ERROR', ":Closing Link: (Ping timeout)" rescue nil
 				s.cleanup
 				next
 			end
