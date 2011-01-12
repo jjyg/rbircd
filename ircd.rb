@@ -598,12 +598,12 @@ class Ircd
 		@last_tnow = tnow
 
 		servers.dup.each { |s|
-			if s.last_pong < tnow - (@conf.ping_timeout / 2 + 10)
+			if s.last_pong < tnow - (@conf.ping_timeout * 2 + 10)
 				s.send 'ERROR', ":Closing Link: (Ping timeout)" rescue nil
 				s.cleanup
 				next
 			end
-			if s.last_ping < tnow - @conf.ping_timeout / 2
+			if s.last_ping < tnow - @conf.ping_timeout * 2
 				s.send 'PING', ":#{name}"
 				s.last_ping = tnow
 			end

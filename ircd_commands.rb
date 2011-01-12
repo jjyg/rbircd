@@ -922,7 +922,7 @@ class Server
 	end
 
 	def send_chan_full(c)
-		m = '+' + chan.mode
+		m = '+' + c.mode
 		ma = []
 		if c.limit
 			m << 'l'
@@ -939,12 +939,12 @@ class Server
 			pfx << '+' if c.voice?(u)
 			ulist << "#{pfx}#{u.nick}"
 			if ulist.join(' ').length > 200
-				sv_send 'SJOIN', cur_ts(chan.ts), chan.name, "#{[m, ma].join(' ')}", ":#{pfx}#{user.nick}"
+				sv_send 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
 				m, ma, ulist = '+', [], []
 			end
 		}
 		if not ulist.empty?
-			sv_send 'SJOIN', cur_ts(chan.ts), chan.name, "#{[m, ma].join(' ')}", ":#{pfx}#{user.nick}"
+			sv_send 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
 		end
 	end
 
