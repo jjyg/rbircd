@@ -674,6 +674,7 @@ class Ircd
 		l = l[0, maxlen].chomp
 		puts "> #{l}" if $DEBUG
 		l
+	rescue
 	end
 
 	# ":abc d e f :g h"  =>  [":abc", "d", "e", "f", "g h"]
