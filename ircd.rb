@@ -437,6 +437,13 @@ class Ircd
 		load __FILE__	# reload this source
 		conf = Conf.new	# reload the configuration
 		conf.load(@conffile)
+		if @conf.logfile
+			$stdout.flush
+			$stderr.flush
+			$stdout.reopen File.open(@conf.logfile, 'a')
+			$stderr.reopen $stdout
+			conf.logfile = @conf.logfile
+		end
 		@conf = conf	# this allows conf.load to fail/raise without impacting the existing @conf
 		@clines_timeout = @conf.clines.map { |c| { :last_try_sconnect => Time.now.to_f, :cline => c } if c[:port] }.compact
 		startup		# apply conf changes (ports/clines/olines)
@@ -718,6 +725,7 @@ class Ircd
 		ircd = new(conffile)
 		ircd.startup
 		trap('HUP') { ircd.rehash }
+		ircd.conf.logfile = logfile
 		ircd.main_loop
 	end
 
@@ -733,6 +741,7 @@ class Ircd
 		$stdout.reopen log
 		$stderr.reopen $stdout
 		trap('HUP') { ircd.rehash }
+		ircd.conf.logfile = logfile
 		ircd.main_loop
 		exit!
 	end
@@ -754,6 +763,7 @@ class Conf
 	attr_accessor :ssl_key_path, :ssl_cert_path
 	attr_accessor :user_chan_limit	# max chan per user
 	attr_accessor :max_chan_mode_cmd	# max chan mode change per /mode command
+	attr_accessor :logfile
 
 	def initialize
 		@plines = []
