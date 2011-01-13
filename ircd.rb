@@ -14,6 +14,9 @@ module HasSock
 		msg = a.join(' ').gsub(/[\r\n]/, '_') << "\r\n"
 		puts "< #{msg}" if $DEBUG
 		@fd.write msg
+	rescue
+		puts "#{Time.now} #{fqdn} #{$!} #{$!.message}"
+		cleanup if respond_to?(:cleanup)
 	end
 
 	# send() with ircd name prefixed
