@@ -698,14 +698,14 @@ class User
 	end
 
 	def cmd_ison(l)
-		return if not chk_parm(l, 1)
+		return if chk_parm(l, 1)
 
 		list = l[1..-1].find_all { |u| @ircd.find_user(u) }
 		sv_send 303, @nick, ":#{list.join(' ')}"
 	end
 
 	def cmd_wallops(l)
-		return if not chk_parm(l, 1)
+		return if chk_parm(l, 1)
 
 		@ircd.send_wallops(":#{fqdn} WALLOPS :#{l[1]}")
 	end
