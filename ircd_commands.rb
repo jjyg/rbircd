@@ -1486,7 +1486,7 @@ class Pending
 	end
 
 	def cmd_quit(l)
-		send "ERROR :Closing Link: 0.0.0.0 (Quit: )"
+		send 'ERROR :Closing Link: 0.0.0.0 (Quit: )'
 		cleanup
 	end
 

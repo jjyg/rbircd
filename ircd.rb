@@ -277,6 +277,7 @@ class Pending
 		clt.descr = @user[4]
 		clt.ts = Time.now.to_i
 		clt.mode << 'S' if @fromport.pline[:ssl]
+		@ircd.del_user clt
 		@ircd.pending.delete self
 		@ircd.add_user clt
 		@ircd.servers.each { |s| s.send_nick_full(clt) }
@@ -498,9 +499,15 @@ class Ircd
 		str.tr('A-Z[\\]', 'a-z{|}')
 	end
 
-	def find_user(nick) @user[downcase(nick)] end
+	def find_user(nick) u = @user[downcase(nick)]; u if u.kind_of?(User) end
 	def find_chan(name) @chan[downcase(name)] end
-	def add_user(user) @user[downcase(user.nick)] = user end
+	def add_user(user)
+		if p = @user[downcase(user.nick)]
+			p.send 'ERROR :Closing Link: 0.0.0.0 (Overridden)'
+			p.cleanup
+		end
+	       	@user[downcase(user.nick)] = user
+	end
 	def add_chan(chan) @chan[downcase(chan.name)] = chan end
 	def del_user(user) @user.delete downcase(user.nick) end
 	def del_chan(chan) @chan.delete downcase(chan.name) end
