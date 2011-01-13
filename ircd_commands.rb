@@ -663,7 +663,7 @@ class User
 			when 'n'; list.find_all { |u| @ircd.match_mask(arg, u.nick) }
 			when 's'
 				list.find_all { |u|
-					@incd.match_mask(arg, u.servername)
+					@ircd.match_mask(arg, u.servername)
 				}
 			when 'u'; list.find_all { |u| @ircd.match_mask(arg, u.ident) }
 			end
@@ -695,6 +695,13 @@ class User
 			}
 		}
 		sv_send 356, @nick, '*', ':End of /LINKS command'
+	end
+
+	def cmd_ison(l)
+		return if not chk_parm(l, 1)
+
+		list = l[1..-1].find_all { |u| @ircd.find_user(u) }
+		sv_send 303, @nick, ":#{list.join(' ')}"
 	end
 
 	def cmd_wallops(l)
