@@ -700,7 +700,9 @@ class User
 	def cmd_ison(l)
 		return if chk_parm(l, 1)
 
-		list = l[1..-1].find_all { |u| @ircd.find_user(u) }
+		list = l.dup
+		list[-1] = list[-1].split
+		list = list.flatten.find_all { |u| @ircd.find_user(u) }
 		sv_send 303, @nick, ":#{list.join(' ')}"
 	end
 
