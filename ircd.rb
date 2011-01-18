@@ -643,7 +643,7 @@ class Ircd
 			end
 			if u.last_ping < tnow - @conf.ping_timeout / 2
 				u.send 'PING', ":#{name}"
-				u.last_ping = tnow
+				u.last_ping = tnow + rand
 			end
 		}
 
