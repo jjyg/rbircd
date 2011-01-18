@@ -1322,6 +1322,29 @@ class Server
 		sv_send 318, ask, nick, ':End of /WHOIS command'
 	end
 
+	def cmd_whowas(l, from)
+		if @ircd.match_mask(l[3], @ircd.name)
+		elsif srv = @ircd.servers.find { |s| @ircd.match_mask(l[3], s.name) } || @ircd.servers.find { |s| s.servers.find { |ss| @ircd.match_mask(l[3], ss[:name]) } }
+			srv.send unsplit(l, from)
+			return
+		end
+
+		ask = split_nih(from[1..-1])[0]
+
+		# [nick user host '*' descr server time]
+		lst = @ircd.findall_whowas(l[1]).reverse
+		lst = lst[0, l[2].to_i] if l[2]
+		if lst.empty?
+			sv_send 406, ask, l[1], ':There was no such nickname'
+		else
+			lst.each { |w|
+				sv_send 314, ask, w[0], w[1], w[2], w[3], ":#{w[4]}"
+				sv_send 312, ask, w[0], w[5], ":#{Time.at(w[6]).strftime('%c')}"
+			}
+		end
+		sv_send 369, ask, l[1], ':End of WHOWAS'
+	end
+
 	def cmd_quit(l, from)
 		forward(l, from)
 		nick, user, host = split_nih(from[1..-1])

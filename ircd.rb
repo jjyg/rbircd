@@ -441,8 +441,8 @@ class Ircd
 		conf = Conf.new	# reload the configuration
 		conf.load(@conffile)
 		if @conf.logfile
-			$stdout.flush
-			$stderr.flush
+			$stdout.flush ; $stdout.fsync
+			$stderr.flush ; $stderr.fsync
 			$stdout.reopen File.open(@conf.logfile, 'a')
 			$stderr.reopen $stdout
 			conf.logfile = @conf.logfile
