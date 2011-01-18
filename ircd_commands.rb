@@ -803,7 +803,8 @@ class User
 			if u.local?
 				u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILL by #@nick (#{reason}))"
 			end
-			u.cleanup ":#{fqdn} KILL #{l[1]} :irc!#{@ircd.name}!#{u.nick} (#{reason})"	# XXX path..
+			@ircd.send_servers ":#@nick KILL #{l[1]} :irc!#{@ircd.name}!#{@nick} (#{reason})"	# XXX path
+			u.cleanup ":#{u.fqdn} QUIT :Killed (#{@nick} (#{reason}))", false
 			@ircd.send_global "#@nick used KILL #{u.nick} (#{reason})"
 		end
 	end
