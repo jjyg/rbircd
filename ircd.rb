@@ -290,7 +290,13 @@ class Pending
 		pa = @fd.to_io.peeraddr
 		@hostname = pa[3]
 		Timeout.timeout(2, RuntimeError) {
-			@hostname = Socket.gethostbyaddr(@hostname.split('.').map { |i| i.to_i }.pack('C*'))[0]
+			raw = @hostname.split('.').map { |i| i.to_i }.pack('C*')
+			if pa[0] =~ /INET6/
+				raw = @hostname.split(':')
+				raw[raw.index('')] = [''] * (9 - raw.length) if raw.index('')
+				raw = raw.flatten.map { |s| s.to_i(16) }.pack('n*')
+			end
+			@hostname = Socket.gethostbyaddr(raw)[0]
 		}
 		sv_send 'NOTICE', 'AUTH', ':*** Found your hostname' if verb
 	rescue
