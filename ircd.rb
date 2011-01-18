@@ -410,6 +410,7 @@ class Ircd
 	attr_accessor :ports
 	# incoming, non-established connections
 	attr_accessor :pending
+	attr_accessor :whowas
 
 	attr_accessor :conf, :conffile
 
@@ -419,6 +420,7 @@ class Ircd
 		@servers = []
 		@ports = []
 		@pending = []
+		@whowas = []
 		@conf = Conf.new
 		@conffile = conffile
 		@conf.load(@conffile) if @conffile
@@ -509,8 +511,27 @@ class Ircd
 	       	@user[downcase(user.nick)] = user
 	end
 	def add_chan(chan) @chan[downcase(chan.name)] = chan end
-	def del_user(user) @user.delete downcase(user.nick) end
+	def del_user(user) add_whowas(@user.delete(downcase(user.nick))) end
 	def del_chan(chan) @chan.delete downcase(chan.name) end
+
+	# return the list of [nick ident host '*' descr srv time] where nick == n
+	def findall_whowas(n)
+		n = downcase(n)
+		@whowas.find_all { |w| downcase(w[0]) == n }
+	end
+
+	def add_whowas(u)
+		return if not u.kind_of? User
+
+		# enforce @whowas limits
+		tnow = Time.now.to_i
+		@whowas.shift while @whowas.length >= @conf.whowas[:maxlen]
+		@whowas.shift while @whowas.first and @whowas.first[-1] < tnow - @conf.whowas[:maxage]
+		lst = findall_whowas(u.nick)
+		@whowas.delete lst.first if lst.length >= @conf.whowas[:maxdup]
+
+		@whowas << [u.nick, u.ident, u.hostname, '*', u.descr, u.servername, tnow]
+	end
 
 	# send a message to all connected servers
 	def send_servers(msg)
@@ -771,6 +792,7 @@ class Conf
 	attr_accessor :user_chan_limit	# max chan per user
 	attr_accessor :max_chan_mode_cmd	# max chan mode change per /mode command
 	attr_accessor :logfile
+	attr_accessor :whowas
 
 	def initialize
 		@plines = []
@@ -786,6 +808,7 @@ class Conf
 		@ssl_cert_path = 'ssl_cert.pem'
 		@user_chan_limit = 25
 		@max_chan_mode_cmd = 6
+		@whowas = { :maxlen => 5000, :maxdup => 9, :maxage => 3600*24*32 }
 	end
 
 	def load(filename)

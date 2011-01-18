@@ -579,6 +579,37 @@ class User
 		sv_send 318, @nick, fn, ':End of /WHOIS command'
 	end
 
+	def cmd_whowas(l)
+		if not l[1]
+			sv_send 431, @nick, ':No nickname given'
+			return
+		end
+
+		if l[3]
+			if @ircd.match_mask(l[3], @ircd.name)
+			elsif srv = @ircd.servers.find { |s| @ircd.match_mask(l[3], s.name) } || @ircd.servers.find { |s| s.servers.find { |ss| @ircd.match_mask(l[3], ss[:name]) } }
+				srv.send ":#@nick", 'WHOWAS', l[1], l[2], l[3]
+				return
+			else
+				sv_send 402, @nick, srvname, ':No such server'
+				return
+			end
+		end
+
+		# [nick user host '*' descr server time]
+		lst = @ircd.findall_whowas(l[1]).reverse
+		lst = lst[0, l[2].to_i] if l[2]
+		if lst.empty?
+			sv_send 406, @nick, l[1], ':There was no such nickname'
+		else
+			lst.each { |w|
+				sv_send 314, @nick, w[0], w[1], w[2], w[3], ":#{w[4]}"
+				sv_send 312, @nick, w[0], w[5], ":#{Time.at(w[6]).strftime('%c')}"
+			}
+		end
+		sv_send 369, @nick, l[1], ':End of WHOWAS'
+	end
+
 	def cmd_invite(l)
 		return if chk_parm(l, 2)
 
