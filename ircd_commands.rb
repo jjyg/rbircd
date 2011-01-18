@@ -1276,7 +1276,7 @@ class Server
 
 		if u = @ircd.find_user(nick)
 			sv_send 311, ask, u.nick, u.ident, u.hostname, '*', ":#{u.descr}"
-			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) }
+			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or u.mode.includ?('o') }
 			clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
 			sv_send 319, ask, u.nick, ":#{clist.join(' ')}" if not clist.empty?
 			sv_send 312, ask, u.nick, u.servername, ":#{u.local? ? usr.ircd.descr : u.from_server.descr}"
