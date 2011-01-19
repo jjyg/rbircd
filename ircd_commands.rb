@@ -96,7 +96,7 @@ class User
 		if not @ircd.check_nickname(nick)
 			sv_send 432, @nick, nick, ':Bad nickname'
 		elsif nick == @nick
-		elsif @ircd.find_user(nick)
+		elsif @ircd.find_user(nick) and @ircd.downcase(nick) != @ircd.downcase(@nick)
 			sv_send 433, @nick, nick, ':Nickname is already in use'
 		elsif cn = chans.find { |c| (c.banned?(self) or c.mode.include?('m')) and not (c.op?(self) or c.voice?(self)) }
 			sv_send 437, @nick, cn.name, ':Cannot change nickname while banned or moderated on channel'
