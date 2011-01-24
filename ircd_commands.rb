@@ -571,7 +571,17 @@ class User
 				sv_send 317, @nick, u.nick, (Time.now - u.last_active).to_i, u.connect_time.to_i, ':seconds idle, signon time' if u.local?
 				clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or @mode.include?('o') }
 				clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
-				sv_send 319, @nick, u.nick, ":#{clist.join(' ')}" if not clist.empty?
+				buf = nil
+				while not clist.empty?
+					if not buf or buf.length < 400
+						buf ? buf << ' ' : buf = ':'
+						buf << clist.shift
+					else
+						sv_send 319, @nick, u.nick, buf
+						buf = nil
+					end
+				end
+				sv_send 319, @nick, u.nick, buf if buf
 			else
 				sv_send 401, @nick, nick, ':No such nick/channel'
 			end
@@ -1310,7 +1320,17 @@ class Server
 			sv_send 311, ask, u.nick, u.ident, u.hostname, '*', ":#{u.descr}"
 			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or u.mode.includ?('o') }
 			clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
-			sv_send 319, ask, u.nick, ":#{clist.join(' ')}" if not clist.empty?
+			buf = nil
+			while not clist.empty?
+				if not buf or buf.length < 400
+					buf ? buf << ' ' : buf = ':'
+					buf << clist.shift
+				else
+					sv_send 319, ask, u.nick, buf
+					buf = nil
+				end
+			end
+			sv_send 319, ask, u.nick, buf if buf
 			sv_send 312, ask, u.nick, u.servername, ":#{u.local? ? usr.ircd.descr : u.from_server.descr}"
 			sv_send 301, ask, u.nick, ":#{u.away}" if u.away
 			sv_send 307, ask, u.nick, ':has identified for this nick' if false

@@ -15,7 +15,7 @@ module HasSock
 		puts "< #{msg}" if $DEBUG
 		@fd.write msg
 	rescue
-		puts "#{Time.now} #{fqdn} #{$!} #{$!.message}"
+		puts "#{Time.now} #{respond_to?(:fqdn) ? fqdn : self} #{$!} #{$!.message}"
 		cleanup if respond_to?(:cleanup)
 	end
 
