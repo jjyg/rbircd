@@ -965,6 +965,7 @@ class Server
 		}
 		send 'PING', ":#{@ircd.name}"
 		send 'BURST', 0
+		puts "#{Time.now} connected to #{@name} - sent burst"
 	end
 
 	def send_nick_full(u)
@@ -1399,8 +1400,13 @@ class Server
 	end
 
 	def setup_cx
-		if @cline[:rc4] and @capab.to_a.include?('DKEY')
-			send 'DKEY', 'START'
+		if @cline[:rc4]
+			if @capab.to_a.include?('DKEY')
+				send 'DKEY', 'START'
+			else
+				send 'ERROR', ':need CAPAB DKEY'
+				cleanup
+			end
 		elsif @cline[:zip] and @capab.to_a.include?('ZIP')
 			#send 'SVINFO', 'ZIP'
 			#@fd = writezip(@fd)
@@ -1459,6 +1465,12 @@ class Server
 			send 'DKEY', 'EXIT'
 			@ircd.send_gnotice "DH negociation successful with #{@cline[:name]}, connection encrypted"
 		when 'EXIT'
+			if not @fd.kind_of? CryptoIo or not @fd.rd.kind_of? RC4 or not @fd.wr.kind_of? RC4
+				send 'ERROR', ':nope'
+				cleanup
+				return
+			end
+
 			if @cline[:zip] and @capab.to_a.include?('ZIP')
 				# send 'SVINFO', 'ZIP'
 				# @fd = ZipIo.new(@fd, nil, true)
