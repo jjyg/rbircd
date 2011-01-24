@@ -146,7 +146,7 @@ class Server
 		}
 		p.sconnect(cline)
 		ircd.pending << p
-	rescue Timeout::Eror
+	rescue Timeout::Error
 		ircd.send_global "Routing - connection to #{cline[:name]} timed out"
 	rescue
 		ircd.send_global "Routing - connection to #{cline[:name]} refused (#{$!.message})"
