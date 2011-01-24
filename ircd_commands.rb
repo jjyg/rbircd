@@ -724,7 +724,7 @@ class User
 			sv_send 352, @nick, channame, u.ident, u.hostname, u.servername, u.nick, flags, ":#{u.local? ? 0 : 1} #{u.descr}"
 		}
 
-		sv_send 315, @nick, l, ':End of /WHO command'
+		sv_send 315, @nick, channame, ':End of /WHO command'
 	end
 
 	def cmd_links(l)
