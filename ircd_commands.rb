@@ -620,6 +620,16 @@ class User
 		sv_send 369, @nick, l[1], ':End of WHOWAS'
 	end
 
+	def cmd_userhost(l)
+		ans = l[1..-1].map { |nick|
+			if u = @ircd.find_user(nick)
+				"#{u.nick}#{'*' if u.mode.include?('o')}=#{u.away ? '-' : '+'}#{u.ident}@#{u.hostname}"
+			end
+		}.compact.join(' ')
+
+		sv_send 302, @nick, ":#{ans}"
+	end
+
 	def cmd_invite(l)
 		return if chk_parm(l, 2)
 
