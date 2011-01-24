@@ -15,7 +15,7 @@ module HasSock
 		puts "< #{msg}" if $DEBUG
 		@fd.write msg
 	rescue
-		puts "#{Time.now} #{respond_to?(:fqdn) ? fqdn : self} #{$!} #{$!.message}"
+		puts "#{Time.now} #{respond_to?(:fqdn) ? fqdn : self} #{$!.class} #{$!.message}"
 		cleanup if respond_to?(:cleanup)
 	end
 
@@ -109,7 +109,7 @@ class User
 		puts "< #{msg}" if $DEBUG
 		(fd || from_server.fd).write msg
 	rescue
-		puts "#{Time.now} #{fqdn} #{$!} #{$!.message}"
+		puts "#{Time.now} #{fqdn} #{$!.class} #{$!.message}"
 		cleanup ":#{fqdn} QUIT :Broken pipe" if fd
 	end
 
@@ -141,14 +141,16 @@ class Server
 
 	def self.sconnect(ircd, cline)
 		ircd.send_global("Routing - connection from #{ircd.name} to #{cline[:name]} activated")
-		p = Timeout.timeout(4, RuntimeError) {
+		p = Timeout.timeout(4) {
 			Pending.new(ircd, TCPSocket.open(cline[:host], cline[:port]))
 		}
 		p.sconnect(cline)
 		ircd.pending << p
+	rescue Timeout::Eror
+		ircd.send_global "Routing - connection to #{cline[:name]} timed out"
 	rescue
 		ircd.send_global "Routing - connection to #{cline[:name]} refused (#{$!.message})"
-		puts "#{Time.now} #{$!} #{$!.message}", $!.backtrace, ''
+		puts "#{Time.now} #{$!.class} #{$!.message}", $!.backtrace, ''
 	end
 
 	def can_read
@@ -204,14 +206,16 @@ class Port
 	end
 
 	def can_read
-		Timeout.timeout(2, RuntimeError) {
+		Timeout.timeout(2) {
 			afd, sockaddr = @fd.accept
 			return if not afd
 			afd = accept_ssl(afd) if @pline[:ssl]
 			@ircd.pending << Pending.new(ircd, afd, sockaddr, self)
 		}
+	rescue Timeout::Error
+		# dont care
 	rescue
-		puts "#{Time.now} #{$!} #{$!.message}", $!.backtrace, ''
+		puts "#{Time.now} #{$!.class} #{$!.message}", $!.backtrace, ''
 	end
 
 	def accept_ssl(fd)
@@ -631,7 +635,7 @@ class Ircd
 		check_timeouts
 		wait_sockets
 	rescue
-		puts "#{Time.now} #{$!} #{$!.message}", $!.backtrace, ''
+		puts "#{Time.now} #{$!.class} #{$!.message}", $!.backtrace, ''
 		sleep 0.4
 	end
 
