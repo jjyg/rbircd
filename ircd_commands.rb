@@ -1318,7 +1318,7 @@ class Server
 
 		if u = @ircd.find_user(nick)
 			sv_send 311, ask, u.nick, u.ident, u.hostname, '*', ":#{u.descr}"
-			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or u.mode.includ?('o') }
+			clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or u.mode.include?('o') }
 			clist = clist.map { |c| (c.op?(u) ? '@' : c.voice?(u) ? '+' : '') + c.name }
 			buf = nil
 			while not clist.empty?
