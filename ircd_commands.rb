@@ -1396,7 +1396,8 @@ class Server
 			if u.local?
 				u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILLED by #{from[1..-1]} (#{l[2]}))"
 			end
-			u.cleanup(unsplit(l, from, true), false)
+			msg = ":#{u.fqdn} QUIT :Killed (#{l[2]})"
+			u.cleanup(msg, false)
 		end
 	end
 
