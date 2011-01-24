@@ -642,7 +642,8 @@ class User
 			chan.invites << { :user => u, :who => fqdn, :when => Time.now.to_i } if not chan.invites.find { |i| i[:user] == u }
 			msg = "INVITE #{nick} :#{channame}"
 			u.send ":#{fqdn} #{msg}" if u.local?
-			@ircd.send_servers "#@nick #{msg}"
+			@ircd.send_servers ":#@nick #{msg}"
+			sv_send 341, @nick, nick, channame
 			cmd_notice ['NOTICE', "@#{channame}", "#{nick} invited #{u.nick} into channel #{channame}"]
 		end
 	end
