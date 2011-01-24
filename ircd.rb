@@ -446,7 +446,7 @@ class Ircd
 	end
 
 	def rehash
-		puts 'rehash'
+		puts "#{Time.now} rehash"
 		load __FILE__	# reload this source
 		conf = Conf.new	# reload the configuration
 		conf.load(@conffile)
@@ -619,7 +619,7 @@ class Ircd
 		@conf.plines.each { |p|
 			next if @ports.find { |pp| pp.pline == p }
 			fd = TCPServer.open(p[:host], p[:port])
-			puts "listening on #{p[:host]}:#{p[:port]}#{' (ssl)' if p[:ssl]}"
+			puts "#{Time.now} listening on #{p[:host]}:#{p[:port]}#{' (ssl)' if p[:ssl]}"
 			@ports << Port.new(self, fd, p)
 		}
 
@@ -723,6 +723,8 @@ class Ircd
 		puts "> #{l}" if $DEBUG
 		l
 	rescue
+		r = fd_to_recv(fd)
+		puts "#{Time.now} fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}"
 	end
 
 	# ":abc d e f :g h"  =>  [":abc", "d", "e", "f", "g h"]
