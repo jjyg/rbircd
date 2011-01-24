@@ -1532,15 +1532,16 @@ class Pending
 
 	def cmd_user(l)
 		if l.length < 5
-			sv_send 461, @nick, 'USER', ':Not enough parameters'
-		else
-			@user = l
-			if @hostname == '0.0.0.0'
-				retrieve_hostname
-				retrieve_ident
-			end
-			check_conn
+			sv_send 461, @nick, l[0], ':Not enough parameters'
+			return
 		end
+
+		@user = l
+		if @hostname == '0.0.0.0'
+			retrieve_hostname
+			retrieve_ident
+		end
+		check_conn
 	end
 
 	def cmd_pass(l)
@@ -1548,6 +1549,11 @@ class Pending
 	end
 
 	def cmd_nick(l)
+		if l.length < 2
+			sv_send 461, @nick, l[0], ':Not enough parameters'
+			return
+		end
+
 		nick = l[1]
 		if not @ircd.check_nickname(nick)
 			sv_send 432, @nick, nick, ':bad nickname'
