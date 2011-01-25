@@ -96,7 +96,7 @@ class User
 		if not @ircd.check_nickname(nick)
 			sv_send 432, @nick, nick, ':Bad nickname'
 		elsif nick == @nick
-		elsif @ircd.find_user(nick) and @ircd.downcase(nick) != @ircd.downcase(@nick)
+		elsif @ircd.find_user(nick) and not @ircd.streq(nick, @nick)
 			sv_send 433, @nick, nick, ':Nickname is already in use'
 		elsif cn = chans.find { |c| (c.banned?(self) or c.mode.include?('m')) and not (c.op?(self) or c.voice?(self)) }
 			sv_send 437, @nick, cn.name, ':Cannot change nickname while banned or moderated on channel'
@@ -332,8 +332,8 @@ class User
 				parm = '*!' + parm if not parm.include?('!')
 				parm = parm + '@*' if not parm.include?('@')
 				if minus
-					list.delete_if { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(parm) }
-				elsif not list.find { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(parm) }
+					list.delete_if { |b| @ircd.streq(b[:mask], parm) }
+				elsif not list.find { |b| @ircd.streq(b[:mask], parm) }
 					list << { :mask => parm, :who => fqdn, :when => Time.now.to_i }
 				else next
 				end
@@ -355,7 +355,7 @@ class User
 			when 'o', 'v'	# ops/voices
 				list = (m == 'o' ? chan.ops : chan.voices)
 				next if not parm = params.shift
-				if not u = chan.users.find { |u| @ircd.downcase(u.nick) == @ircd.downcase(parm) }
+				if not u = chan.users.find { |u| @ircd.streq(u.nick, parm) }
 					sv_send 401, @nick, parm, ':No such nick/channel' if not @ircd.find_user(parm)
 					sv_send 441, @nick, parm, chan.name, ':They are not on that channel'
 					next
@@ -856,8 +856,7 @@ class User
 		return if chk_oper(l)
 		return if chk_parm(l, 1)
 
-		n = @ircd.downcase(l[1])
-		cline = @ircd.clines.find { |c| [c[:name], c[:host], "#{c[:host]}:#{c[:port]}"].find { |ce| @ircd.downcase(ce) == n } }
+		cline = @ircd.clines.find { |c| [c[:name], c[:host], "#{c[:host]}:#{c[:port]}"].find { |ce| @ircd.streq(ce, l[1]) } }
 		if not cline
 			sv_send 'NOTICE', @nick, ":No C-line for #{l[1]}"
 			return
@@ -877,8 +876,8 @@ class User
 		return if chk_param(l, 1)
 
 		# TODO remote squit
-		serv = @ircd.servers.find { |s| @ircd.downcase(s.name) == @ircd.downcase(l[1]) }
-		if not serv
+		srv = @ircd.servers.find { |s| @ircd.streq(s.name, l[1]) }
+		if not srv
 			sv_send 'NOTICE', @nick, ":No such server #{l[1]}"
 			return
 		end
@@ -1226,8 +1225,8 @@ class Server
 				list = (m == 'b' ? c.bans : c.banexcept)
 				mask = margs.shift
 				if minus
-					list.delete_if { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(mask) }
-				elsif not list.find { |b| @ircd.downcase(b[:mask]) == @ircd.downcase(mask) }
+					list.delete_if { |b| @ircd.streq(b[:mask], mask) }
+				elsif not list.find { |b| @ircd.streq(b[:mask], mask) }
 					if who[0] == ?:
 						who = who[1..-1]
 						who = @ircd.find_user(who).fqdn if @ircd.find_user(who)

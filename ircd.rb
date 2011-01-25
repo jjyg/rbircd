@@ -336,7 +336,7 @@ class Pending
 		if not @cline
 			cline = @ircd.conf.clines.find { |c|
 				c[:pass] == @pass and
-				@ircd.downcase(c[:name]) == @ircd.downcase(@server[1]) and
+				@ircd.streq(c[:name], @server[1]) and
 				@ircd.match_mask(c[:host], @hostname)
 			}
 			if not cline
@@ -348,7 +348,7 @@ class Pending
 
 			sconnect cline
 		else
-			if @cline[:pass] != @pass or @ircd.downcase(@cline[:name]) != @ircd.downcase(@server[1])
+			if @cline[:pass] != @pass or not @ircd.streq(@cline[:name], @server[1])
 				@ircd.send_global "Link #@ident!#@hostname dropped (No C-line)"
 				send 'ERROR', ":Closing Link: #@ident!#@hostname (No C-line)"
 				cleanup
@@ -511,6 +511,10 @@ class Ircd
 		str.tr('A-Z[\\]', 'a-z{|}')
 	end
 
+	def streq(s1, s2)
+		downcase(s1) == downcase(s2)
+	end
+
 	def find_user(nick) u = @user[downcase(nick)]; u if u.kind_of?(User) end
 	def find_chan(name) @chan[downcase(name)] end
 	def add_user(user)
@@ -526,8 +530,7 @@ class Ircd
 
 	# return the list of [nick ident host '*' descr srv time] where nick == n
 	def findall_whowas(n)
-		n = downcase(n)
-		@whowas.find_all { |w| downcase(w[0]) == n }
+		@whowas.find_all { |w| streq(w[0], n) }
 	end
 
 	def add_whowas(u)
