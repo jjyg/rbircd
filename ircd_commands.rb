@@ -6,6 +6,7 @@ class User
 			__send__ msg, l
 		else
 			puts "unhandled user #{fqdn} #{l.inspect}"
+			$stdout.flush
    			sv_send 421, @nick, l[0], ':unknown command'
 		end
 	end
@@ -873,7 +874,7 @@ class User
 
 	def cmd_squit(l)
 		return if chk_oper(l)
-		return if chk_param(l, 1)
+		return if chk_parm(l, 1)
 
 		# TODO remote squit
 		srv = @ircd.servers.find { |s| @ircd.streq(s.name, l[1]) }
@@ -892,7 +893,7 @@ class User
 	def cmd_purge(l)
 		return if chk_oper(l)
 
-		return if chk_param(l, 1)
+		return if chk_parm(l, 1)
 
 		srv = @ircd.servers.find { |s| @ircd.streq(s.name, l[1]) }
 		if not srv
@@ -907,7 +908,7 @@ class User
 			srv.purge = { :from => @nick, :list => list, :sent => [n] }
 			srv.send ":#@nick", 'WHOIS', l[1], n
 		end
-		sv_send 'NOTICE', @nick, ":Purge ongoing #{srv.purge[:list].length} - #{srv.sent.join(' ')}"
+		sv_send 'NOTICE', @nick, ":Purge ongoing #{srv.purge[:list].length} - #{srv.purge[:sent].join(' ')}"
 	end
 end
 
@@ -923,7 +924,7 @@ class Server
 			# PURGE intercepts WHOIS responses
 			if pg = purge and @ircd.streq(pg[:from], l[1]) and pg[:sent].find { |n| @ircd.streq(n, l[2]) }
 				case l[0]
-				when 401
+				when '401'
 					if u = @ircd.find_user(l[2])
 						@ircd.find_user(pg[:from]).sv_send 'NOTICE', pg[:from], ":Purgeing #{u.fqdn}"
 						if u.local?
@@ -932,7 +933,7 @@ class Server
 						u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
 						forward(['KILL', l[1], "irc!#{l[1]} (collision)"], @name)
 					end
-				when 318
+				when '318'
 					pg[:sent].delete_if { |n| @ircd.streq(n, l[2]) }
 					if pg[:list].empty? and pg[:sent].empty?
 						@ircd.find_user(pg[:from]).sv_send 'NOTICE', pg[:from], ":Purge done"
@@ -964,7 +965,7 @@ class Server
 
 	# retrieve the TS shifted to match the peer delta
 	def cur_ts(time = Time.now.to_i)
-		Time.now.to_i - @ts_delta
+		Time.now.to_i - @ts_delta.to_i
 	end
 
 	# send nick change notification to peer - u = old user, ts = time of nick change
@@ -1064,7 +1065,7 @@ class Server
 
 	# send the chan topic/topicwho/topicwhen
 	def send_topic(chan, who=nil)
-		send ":#{who ? who.nick : @ircd.name}", 'TOPIC', chan.name, split_nih(chan.topicwho)[0], chan.topicwhen, ":#{chan.topic}"
+		send ":#{who ? who.nick : @ircd.name}", 'TOPIC', chan.name, split_nih(chan.topicwho || @name)[0], chan.topicwhen, ":#{chan.topic}"
 	end
 
 	# retrieve a user, create it if it does not exist already
@@ -1603,6 +1604,9 @@ class Pending
 	end
 
 	def cmd_(l)
+	end
+
+	def cmd_cap(l)
 	end
 
 	def cmd_user(l)
