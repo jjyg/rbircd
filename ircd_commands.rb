@@ -904,11 +904,13 @@ class User
 		if srv.purge
 		elsif not @ircd.users.empty?
 			list = @ircd.users.map { |u| u.nick }.sort
-			if l.length > 2
+			if l[2] == 'dryrun'
+			elsif l.length > 2
 				list = l[2..-1]
 			end
 			n = list.pop
 			srv.purge = { :from => @nick, :list => list, :sent => [n] }
+			srv.purge[:dryrun] = true if l[2] == 'dryrun'
 			srv.send ":#@nick", 'WHOIS', l[1], n
 		end
 		sv_send 'NOTICE', @nick, ":Purge ongoing #{srv.purge[:list].length} - #{srv.purge[:sent].join(' ')}"
@@ -948,6 +950,7 @@ class Server
 			if u = @ircd.find_user(l[2])
 				return if l[0] == '311' and @ircd.streq(u.fqdn, "#{l[2]}!#{l[3]}@#{l[4]}")
 				@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purgeing #{u.fqdn}"
+				return if purge[:dryrun]
 				if u.local?
 					u.send "ERROR :Closing Link: #{@ircd.name} #{u.nick} (KILL (collision))"
 				end
@@ -957,8 +960,10 @@ class Server
 			if l[0] == '311'
 				u = User.new(@ircd, l[2], l[3], l[4], self)
 				u.descr = l[6]
+				@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge create #{u.fqdn}"
+				return if purge[:dryrun]
 				@ircd.add_user u
-				forward "NICK #{u.nick} 2 #{u.ts} +i #{u.ident} #{u.hostname} #{u.servername} 0 0 :#{u.descr}"
+				forward(["NICK #{u.nick} 2 #{u.ts} +i #{u.ident} #{u.hostname} #{u.servername} 0 0", u.descr], @name)
 			end
 
 		when '319'
@@ -982,10 +987,12 @@ class Server
 
 					if (op and not c.ops.include?(u)) or (vc and not c.voices.include?(u))
 						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: fixchan #{c.name} #{ocn}"
-						cmd_sjoin(['SJOIN', 0, c.name, '+', ocn], @name)
+						next if purge[:dryrun]
+						cmd_sjoin(['SJOIN', 0, c.name, '+', ocn], ':'+@name)
 					elsif not c.users.include? u
 						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: fixchan #{c.name} #{u.fqdn}"
-						cmd_sjoin(['SJOIN', '0', c.name], u.nick)
+						next if purge[:dryrun]
+						cmd_sjoin(['SJOIN', '0', c.name], ':'+u.nick)
 					end
 				}
 			end
@@ -1124,7 +1131,7 @@ class Server
 
 	# attempt to rebuild the original message from the parsed array
 	def unsplit(l, from, sender_fqdn=false)
-		from = from[1..-1] if from
+		from = from[1..-1] if from and from[0] == ?:
 		if from and sender_fqdn and u = @ircd.find_user(from)
 			from = u.fqdn
 		end

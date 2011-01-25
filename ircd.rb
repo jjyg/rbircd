@@ -51,8 +51,12 @@ class User
 		@hostname = hostname
 		if fd.kind_of? Server
 			@from_server = fd
+			@servername = fd.name
+			@serverdescr = fd.descr
 		else
 			@fd = fd
+			@servername = @ircd.name
+			@serverdescr = @ircd.descr
 		end
 		@mode = ''
 		@away = nil
@@ -276,8 +280,6 @@ class Pending
 	def check_conn
 		return if not @user or not @nick
 		clt = User.new(@ircd, @nick, @ident || "~#{@user[1]}", @hostname, @fd)
-		clt.servername = @ircd.name
-		clt.serverdescr = @ircd.descr
 		clt.descr = @user[4]
 		clt.ts = Time.now.to_i
 		clt.mode << 'S' if @fromport.pline[:ssl]
