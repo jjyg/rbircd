@@ -279,7 +279,8 @@ class Pending
 	# check if a client connection has completed
 	def check_conn
 		return if not @user or not @nick
-		clt = User.new(@ircd, @nick, @ident || "~#{@user[1]}", @hostname, @fd)
+		ident = @ident || "~#{@user[1]}"
+		clt = User.new(@ircd, @nick, ident[0, 10], @hostname, @fd)
 		clt.descr = @user[4]
 		clt.ts = Time.now.to_i
 		clt.mode << 'S' if @fromport.pline[:ssl]
