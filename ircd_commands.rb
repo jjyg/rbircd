@@ -904,6 +904,9 @@ class User
 		if srv.purge
 		elsif not @ircd.users.empty?
 			list = @ircd.users.map { |u| u.nick }.sort
+			if l.length > 2
+				list = l[2..-1]
+			end
 			n = list.pop
 			srv.purge = { :from => @nick, :list => list, :sent => [n] }
 			srv.send ":#@nick", 'WHOIS', l[1], n
@@ -920,34 +923,13 @@ class Server
 			@last_pong = Time.now.to_f
 			__send__ msg, l, from
 		elsif l[0] =~ /^\d+$/ and l[1] and u = @ircd.find_user(l[1])
+			# whois response etc
 
-			# PURGE intercepts WHOIS responses
-			if pg = purge and @ircd.streq(pg[:from], l[1]) and pg[:sent].find { |n| @ircd.streq(n, l[2]) }
-				case l[0]
-				when '401'
-					if u = @ircd.find_user(l[2])
-						@ircd.find_user(pg[:from]).sv_send 'NOTICE', pg[:from], ":Purgeing #{u.fqdn}"
-						if u.local?
-							u.send "ERROR :Closing Link: #{@ircd.name} #{u.nick} (KILL (collision))"
-						end
-						u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
-						forward(['KILL', l[1], "irc!#{l[1]} (collision)"], @name)
-					end
-				when '318'
-					pg[:sent].delete_if { |n| @ircd.streq(n, l[2]) }
-					if pg[:list].empty? and pg[:sent].empty?
-						@ircd.find_user(pg[:from]).sv_send 'NOTICE', pg[:from], ":Purge done"
-						@purge = nil
-					elsif n = pg[:list].pop
-						send ":#{pg[:from]}", 'WHOIS', @name, n
-						pg[:sent] << n
-					end
-				end
-
+			if purge and @ircd.streq(purge[:from], l[1]) and purge[:sent].find { |n| @ircd.streq(n, l[2]) }
+				purge_resync(l)
 				return
 			end
 
-			# whois response etc
 			if u.local?
 				u.send unsplit(l, from, true)
 			else
@@ -955,6 +937,69 @@ class Server
 			end
 		else
 			puts "unhandled server #{l.inspect} #{from.inspect}"
+		end
+	end
+
+	# PURGE intercepts WHOIS responses
+	def purge_resync(l)
+		case l[0]
+		when '401', '311'
+			# kill local ?
+			if u = @ircd.find_user(l[2])
+				return if l[0] == '311' and @ircd.streq(u.fqdn, "#{l[2]}!#{l[3]}@#{l[4]}")
+				@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purgeing #{u.fqdn}"
+				if u.local?
+					u.send "ERROR :Closing Link: #{@ircd.name} #{u.nick} (KILL (collision))"
+				end
+				u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
+				forward(['KILL', l[1], "irc!#{l[1]} (collision)"], @name)
+			end
+			if l[0] == '311'
+				u = User.new(@ircd, l[2], l[3], l[4], self)
+				u.descr = l[6]
+				@ircd.add_user u
+				forward "NICK #{u.nick} 2 #{u.ts} +i #{u.ident} #{u.hostname} #{u.servername} 0 0 :#{u.descr}"
+			end
+
+		when '319'
+			# check chans
+			if u = @ircd.find_user(l[2])
+				l[3].split.each { |cn|
+					ocn = cn
+					if cn[0] == ?@
+						op = true
+						cn = cn[1..-1]
+					end
+					if cn[0] == ?+
+						vc = true
+						cn = cn[1..-1]
+					end
+
+					if not c = @ircd.find_chan(cn)
+						c = Channel.new(@ircd, cn)
+						@ircd.add_chan c
+					end
+
+					if (op and not c.ops.include?(u)) or (vc and not c.voices.include?(u))
+						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: fixchan #{c.name} #{ocn}"
+						cmd_sjoin(['SJOIN', 0, c.name, '+', ocn], @name)
+					elsif not c.users.include? u
+						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: fixchan #{c.name} #{u.fqdn}"
+						cmd_sjoin(['SJOIN', '0', c.name], u.nick)
+					end
+				}
+			end
+
+		when '318'
+			# done, send next whois
+			purge[:sent].delete_if { |n| @ircd.streq(n, l[2]) }
+			if purge[:list].empty? and purge[:sent].empty?
+				@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge done"
+				@purge = nil
+			elsif n = purge[:list].pop
+				send ":#{purge[:from]}", 'WHOIS', @name, n
+				purge[:sent] << n
+			end
 		end
 	end
 
@@ -1154,18 +1199,21 @@ class Server
 		else # new nick
 			# NICK mynick hops ts +oiwh myident myhost mysrv 0 2130706433 :mydescr
 			if u = @ircd.find_user(l[1])
-				# TODO kill
-				puts "conflict, should KILL #{l[1]}"
-			else
-				u = User.new(@ircd, l[1], l[5], l[6], self)
-				u.ts = l[3].to_i
-				u.mode = l[4][1..-1] if l[4][0] == ?+
-				u.descr = l[10]
-				u.servername = l[7]
-				u.serverdescr = ((s = @ircd.servers.find { |s| s.name == u.servername }) ? s.descr : nil)
-				u.serverdescr ||= ((s = @ircd.servers.map { |s| s.servers }.flatten.find { |s| s[:name] == u.servername }) ? s[:descr] : nil)
-				@ircd.add_user u
+				# TODO timestamp stuff
+				if u.local?
+					u.send "ERROR :Closing Link: #{@ircd.name} #{u.nick} (KILL (collision))"
+				end
+				u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
+				forward(['KILL', l[1], "irc!#{l[1]} (collision)"], @name)
 			end
+			u = User.new(@ircd, l[1], l[5], l[6], self)
+			u.ts = l[3].to_i
+			u.mode = l[4][1..-1] if l[4][0] == ?+
+			u.descr = l[10]
+			u.servername = l[7]
+			u.serverdescr = ((s = @ircd.servers.find { |s| s.name == u.servername }) ? s.descr : nil)
+			u.serverdescr ||= ((s = @ircd.servers.map { |s| s.servers }.flatten.find { |s| s[:name] == u.servername }) ? s[:descr] : nil)
+			@ircd.add_user u
 		end
 	end
 
@@ -1212,12 +1260,18 @@ class Server
 				nick = nick[1..-1]
 			end
 			u = may_create_user(nick)
-			c.users << u
-			c.voices << u if isvoice
-			c.ops << u if isop
-			@ircd.send_chan_local(c, ":#{u.fqdn} JOIN #{c.name}")
-			send_mode << ['v', u.nick] if isvoice
-			send_mode << ['o', u.nick] if isop
+			if not c.users.include?(u)
+				@ircd.send_chan_local(c, ":#{u.fqdn} JOIN #{c.name}")
+				c.users << u
+			end
+			if isvoice and not c.voices.include?(u)
+				c.voices << u
+				send_mode << ['v', u.nick]
+			end
+			if isop and not c.ops.include?(u)
+				c.ops << u
+				send_mode << ['o', u.nick]
+			end
 		}
 		curm = ''
 		cura = []
