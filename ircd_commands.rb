@@ -883,17 +883,69 @@ class User
 		end
 
 		@ircd.global "#@nick SQUIT #{l[1]}"
-		serv.cleanup
+		srv.cleanup
+	end
+
+	# for each local user, send a whois to the designated server to check we're sync
+	# kill nonexisting remote users
+	# TODO list remote users ? (he knows Bob we dont know about -> how do we find him ?)
+	def cmd_purge(l)
+		return if chk_oper(l)
+
+		return if chk_param(l, 1)
+
+		srv = @ircd.servers.find { |s| @ircd.streq(s.name, l[1]) }
+		if not srv
+			sv_send 'NOTICE', @nick, ":No such server #{l[1]}"
+			return
+		end
+
+		if srv.purge
+		elsif not @ircd.users.empty?
+			list = @ircd.users.map { |u| u.nick }.sort
+			n = list.pop
+			srv.purge = { :from => @nick, :list => list, :sent => [n] }
+			srv.send ":#@nick", 'WHOIS', l[1], n
+		end
+		sv_send 'NOTICE', @nick, ":Purge ongoing #{srv.purge[:list].length} - #{srv.sent.join(' ')}"
 	end
 end
 
 class Server
+	attr_accessor :purge
 	def handle_command(l, from)
 		msg = "cmd_#{l[0].to_s.downcase}"
 		if respond_to? msg
 			@last_pong = Time.now.to_f
 			__send__ msg, l, from
 		elsif l[0] =~ /^\d+$/ and l[1] and u = @ircd.find_user(l[1])
+
+			# PURGE intercepts WHOIS responses
+			if pg = purge and @ircd.streq(pg[:from], l[1]) and pg[:sent].find { |n| @ircd.streq(n, l[2]) }
+				case l[0]
+				when 401
+					if u = @ircd.find_user(l[2])
+						@ircd.find_user(pg[:from]).sv_send 'NOTICE', pg[:from], ":Purgeing #{u.fqdn}"
+						if u.local?
+							u.send "ERROR :Closing Link: #{@ircd.name} #{u.nick} (KILL (collision))"
+						end
+						u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
+						forward(['KILL', l[1], "irc!#{l[1]} (collision)"], @name)
+					end
+				when 318
+					pg[:sent].delete_if { |n| @ircd.streq(n, l[2]) }
+					if pg[:list].empty? and pg[:sent].empty?
+						@ircd.find_user(pg[:from]).sv_send 'NOTICE', pg[:from], ":Purge done"
+						@purge = nil
+					elsif n = pg[:list].pop
+						send ":#{pg[:from]}", 'WHOIS', @name, n
+						pg[:sent] << n
+					end
+				end
+
+				return
+			end
+
 			# whois response etc
 			if u.local?
 				u.send unsplit(l, from, true)
