@@ -193,7 +193,7 @@ class ZipIo
 		end
 	end
 	def pending
-		not @bufrd.empty?
+		@bufrd.length
 	end
 	def write(str)
 	end

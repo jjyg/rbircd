@@ -224,6 +224,12 @@ class Port
 
 	def accept_ssl(fd)
 		fd = OpenSSL::SSL::SSLSocket.new(fd, @sslctx)
+		# YAY OPEN FUCKING SSL
+		class << fd
+			def pending
+				@rbuffer.to_s.length + super()
+			end
+		end
 		fd.sync = true
 		fd.accept
 		fd
@@ -697,7 +703,8 @@ class Ircd
 	end
 
 	def wait_sockets
-		rd, wr = IO.select(rd_socks, nil, nil, 2)
+		rd = rd_socks.find_all { |fd| fd.respond_to?(:pending) and fd.pending > 0 }
+		rd, wr = IO.select(rd_socks, nil, nil, 2) if rd.empty?
 		rd.to_a.each { |fd|
 			fd_to_recv(fd).can_read
 		}
@@ -719,7 +726,7 @@ class Ircd
 	# read a line byte by byte
 	def fd_gets(fd, maxlen=512)
 		l = ''
-		while fd.respond_to?(:pending) ? fd.pending : IO.select([fd], nil, nil, 0)	# yay OpenSSL
+		while (fd.respond_to?(:pending) and fd.pending > 0) or IO.select([fd], nil, nil, 0)	# yay OpenSSL
 			return if not c = fd.read(1)
 			return if l.length > maxlen*8
 			break if c == "\n"
