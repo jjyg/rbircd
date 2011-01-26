@@ -726,7 +726,7 @@ class Ircd
 	# read a line byte by byte
 	def fd_gets(fd, maxlen=512)
 		l = ''
-		while (fd.respond_to?(:pending) and fd.pending > 0) or IO.select([fd], nil, nil, 0)	# yay OpenSSL
+		while (fd.respond_to?(:pending) and fd.pending > 0) or IO.select([fd], nil, nil, 0.01)	# yay OpenSSL
 			return if not c = fd.read(1)
 			return if l.length > maxlen*8
 			break if c == "\n"
