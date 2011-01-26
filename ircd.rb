@@ -91,7 +91,7 @@ class User
 	end
 
 	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection", sendservers = true)
-		@ircd.user.delete_if { |k, v| v == self }
+		@ircd.del_user(self)
 		@ircd.send_servers(reason.sub(/^(:\S+)!\S*/, '\\1')) if sendservers
 		@ircd.send_visible_local(self, reason)
 		@ircd.clean_chans
