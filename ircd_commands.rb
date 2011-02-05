@@ -908,11 +908,11 @@ class User
 			return
 		end
 
-		if srv.purge
+		if srv.purge and (srv.purge[:list].first or srv.purge[:sent].first)
 		elsif not @ircd.users.empty?
 			list = @ircd.users.map { |u| u.nick }.sort
 			dryrun = l.delete_at(2) if l[2] == 'dryrun'
-			if l.length >= 2
+			if l.length > 2
 				list = l[2..-1]
 			end
 			n = list.pop
@@ -934,7 +934,7 @@ class Server
 		elsif l[0] =~ /^\d+$/ and l[1] and u = @ircd.find_user(l[1])
 			# whois response etc
 
-			if purge and @ircd.streq(purge[:from], l[1]) and purge[:sent].find { |n| @ircd.streq(n, l[2]) }
+			if purge and @ircd.streq(purge[:from], l[1]) and l[2] and purge[:sent].find { |n| @ircd.streq(n, l[2]) }
 				purge_resync(l)
 				return
 			end
