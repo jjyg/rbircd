@@ -88,13 +88,15 @@ class User
 		else
 			handle_line(@ircd.split_line(l))
 		end
+	rescue
+		puts "#{Time.now} u #{fqdn} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
 	end
 
-	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection", sendservers = true)
+	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection", sendservers = true, cleanchans = true)
 		@ircd.del_user(self)
 		@ircd.send_servers(reason.sub(/^(:\S+)!\S*/, '\\1')) if sendservers
 		@ircd.send_visible_local(self, reason)
-		@ircd.clean_chans
+		@ircd.clean_chans if cleanchans
 		if fd
 			@fd.close rescue nil
 			@fd.to_io.close rescue nil
@@ -163,13 +165,17 @@ class Server
 		else
 			handle_line(@ircd.split_line(l))
 		end
+	rescue
+		puts "#{Time.now} sv #{@name} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
 	end
 
 	def cleanup
+		puts "#{Time.now} sv #{@name} cleanup"
 		@ircd.servers.delete self
 		oldu = @ircd.users.find_all { |u| u.from_server == self }
 		oldu.each { |u| @ircd.del_user u }
-		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :#{name} #{@ircd.name}" }
+		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :#{name} #{@ircd.name}", true, false }
+		@ircd.clean_chans
 		@ircd.notice_opers("closing cx to server #{@cline[:host]}")
 		@fd.to_io.close rescue nil
 	end
@@ -269,6 +275,8 @@ class Pending
 		else
 			handle_line(@ircd.split_line(l))
 		end
+	rescue
+		puts "#{Time.now} pd #{@nick} #{@hostname} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
 	end
 
 	def cleanup
