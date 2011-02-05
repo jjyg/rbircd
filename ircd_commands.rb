@@ -686,18 +686,24 @@ class User
 			conds = [['+', 'c', l[1]]]
 		end
 
-		if not channame = conds.map { |cd| cd[2] if cd[1] == 'c' }.compact.last
-			sv_send 522, @nick, ':/WHO bad syntax'
-			return
-		end
+		channame = conds.map { |cd| cd[2] if cd[1] == 'c' }.compact.last || 'any'
 
-		if not chan = @ircd.find_chan(channame)
-			sv_send 403, @nick, l[1], ':No such channel'
-			return
+		case channame
+		when 'any', 'none'
+			if not @mode.include?('o')
+				sv_send 522, @nick, ':/WHO bad syntax'
+				return
+			end
+			list = @ircd.users
+			list = list.find_all { |u| u.chans.empty? } if channame == 'none'
+		else
+			if not chan = @ircd.find_chan(channame)
+				sv_send 403, @nick, l[1], ':No such channel'
+				return
+			end
+			list = chan.users
+			list = [] if (chan.mode.include?('p') or chan.mode.include?('s')) and not chan.users.include?(self) and not @mode.include?('o')
 		end
-
-		list = chan.users
-		list = [] if (chan.mode.include?('p') or chan.mode.include?('s')) and not chan.users.include?(self) and not @mode.include?('o')
 
 		conds.each { |cd|
 			arg = cd[2]
@@ -706,7 +712,7 @@ class User
 			when 'a'; list.find_all { |u| u.away }
 			when 'g'; list.find_all { |u| @ircd.match_mask(arg, u.descr) }
 			when 'h'; list.find_all { |u| @ircd.match_mask(arg, u.hostname) }
-			when 'i'; list.find_all { |u| @ircd.match_mask(arg, u.hostname) }
+			when 'i'; list.find_all { |u| @ircd.match_mask(arg, u.ip || u.hostname) }
 			when 'm'
 				list.find_all { |u|
 					a = arg.split(//)
@@ -731,8 +737,8 @@ class User
 		list.each { |u|
 			flags = '' 
 			flags << 'H'	# XXX ?
-			flags << '+' if chan.voice?(u)
-			flags << '@' if chan.op?(u)
+			flags << '+' if chan and chan.voice?(u)
+			flags << '@' if chan and chan.op?(u)
 			sv_send 352, @nick, channame, u.ident, u.hostname, u.servername, u.nick, flags, ":#{u.local? ? 0 : 1} #{u.descr}"
 		}
 
