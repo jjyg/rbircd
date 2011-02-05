@@ -213,10 +213,10 @@ class Port
 
 	def can_read
 		Timeout.timeout(2) {
-			afd, sockaddr = @fd.accept
+			afd = @fd.accept
 			return if not afd
 			afd = accept_ssl(afd) if @pline[:ssl]
-			@ircd.pending << Pending.new(ircd, afd, sockaddr, self)
+			@ircd.pending << Pending.new(ircd, afd, self)
 		}
 	rescue Timeout::Error
 		# dont care
@@ -247,15 +247,14 @@ end
 class Pending
 	include HasSock
 
-	attr_accessor :rmtaddr, :fromport
+	attr_accessor :fromport
 	attr_accessor :pass, :user, :nick, :capab, :cline
 	attr_accessor :ident, :hostname, :ip
 	attr_accessor :last_pong
 
-	def initialize(ircd, fd, rmtaddr=nil, fromport=nil)
+	def initialize(ircd, fd, fromport=nil)
 		@ircd = ircd
 		@fd = fd
-		@rmtaddr = rmtaddr
 		@fromport = fromport
 		@pass = @user = @nick = nil
 		@ident = nil
