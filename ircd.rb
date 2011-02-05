@@ -174,9 +174,9 @@ class Server
 		@ircd.servers.delete self
 		oldu = @ircd.users.find_all { |u| u.from_server == self }
 		oldu.each { |u| @ircd.del_user u }
-		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :#{name} #{@ircd.name}", true, false }
-		@ircd.clean_chans
 		@ircd.notice_opers("closing cx to server #{@cline[:host]}")
+		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :#{@ircd.name} #{name}", true, false }
+		@ircd.clean_chans
 		@fd.to_io.close rescue nil
 	end
 
