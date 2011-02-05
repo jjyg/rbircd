@@ -849,7 +849,8 @@ class User
 	def cmd_die(l)
 		return if chk_oper(l)
 		@ircd.send_global "#@nick killed me !"
-		puts "DIE by #{@fqdn}"
+		puts "#{Time.now} DIE by #{@fqdn}"
+		$stdout.flush
 		exit!(0)
 	end
 
@@ -937,6 +938,10 @@ class Server
 			else
 				u.from_server.send unsplit(l, from)
 			end
+		elsif l[0] == '401' and u = @ircd.find_user(l[2])
+			u.send "ERROR :Closing Link: #{@ircd.name} #{u.nick} (KILL (collision))" if u.local?
+			u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
+			forward(['KILL', l[2], "irc!#{l[1]} (collision)"], @name)
 		else
 			puts "unhandled server #{l.inspect} #{from.inspect}"
 		end
@@ -955,17 +960,33 @@ class Server
 					u.send "ERROR :Closing Link: #{@ircd.name} #{u.nick} (KILL (collision))"
 				end
 				u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
-				forward(['KILL', l[1], "irc!#{l[1]} (collision)"], @name)
+				forward(['KILL', l[2], "irc!#{l[1]} (collision)"], @name)
 			end
 			if l[0] == '311'
-				u = User.new(@ircd, l[2], l[3], l[4], self)
-				u.descr = l[6]
-				@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge create #{u.fqdn}"
-				return if purge[:dryrun]
-				@ircd.add_user u
-				forward(["NICK #{u.nick} 2 #{u.ts} +i #{u.ident} #{u.hostname} #{u.servername} 0 0", u.descr], @name)
+				if wc = @purge.delete(:wantcreate)
+					@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge kill badsv #{u.fqdn}"
+					return if purge[:dryrun]
+					send ":#{@ircd.name} KILL #{wc[0]} :irc!#{@ircd.name} (ghost)"
+				end
+				@purge[:wantcreate] = [l[2], l[3], l[4], l[6]]
 			end
-
+		when '312'
+			if wc = @purge.delete(:wantcreate)
+				sn = l[3]
+				if @ircd.streq(sn, @name) or @servers.find { |s| @ircd.streq(sn, s[:name]) }
+					u = User.new(@ircd, wc[0], wc[1], wc[2], self)
+					u.descr = wc[3]
+					u.servername = sn
+					@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge create #{u.fqdn} from #{sn}"
+					return if purge[:dryrun]
+					@ircd.add_user u
+					forward(["NICK #{u.nick} 2 #{u.ts} +i #{u.ident} #{u.hostname} #{u.servername} 0 0", u.descr], @name)
+				else
+					@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge kill badsv #{u.fqdn} (#{sn})"
+					return if purge[:dryrun]
+					send ":#{@ircd.name} KILL #{wc[0]} :irc!#{@ircd.name} (ghost)"
+				end
+			end
 		when '319'
 			# check chans
 			if u = @ircd.find_user(l[2])
