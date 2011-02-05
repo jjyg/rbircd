@@ -1599,7 +1599,7 @@ class Server
 			when 'O'; @dh_secret_i = @dh_i.secret(num)
 			end
 			if @dh_secret_o and @dh_secret_i
-				puts "< DKEY EXIT" if $DEBUG
+				puts "< DKEY DONE" if $DEBUG
 				@fd.write "DKEY DONE\n"		# send 'DKEY', 'DONE' uses \r\n, remote side decodes \n with rc4 => fail
 				key_o = @dh_secret_o.to_s(16)
 				key_o = '0' + key_o if key_o.length & 1 == 1
