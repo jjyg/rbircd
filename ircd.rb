@@ -713,8 +713,9 @@ class Ircd
 	end
 
 	def wait_sockets
-		rd = rd_socks.find_all { |fd| fd.respond_to?(:pending) and fd.pending > 0 }
-		rd, wr = IO.select(rd_socks, nil, nil, 2) if rd.empty?
+		rs = rd_socks
+		rd = rs.find_all { |fd| fd.respond_to?(:pending) and fd.pending > 0 }
+		rd, wr = IO.select(rs, nil, nil, 2) if rd.empty?
 		rd.to_a.each { |fd|
 			fd_to_recv(fd).can_read
 		}
