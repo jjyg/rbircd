@@ -29,7 +29,7 @@ end
 class User
 	include HasSock
 
-	attr_accessor :nick, :ident, :hostname, :descr
+	attr_accessor :nick, :ident, :hostname, :descr, :ip
 	attr_accessor :mode, :mode_d
 	attr_accessor :away
 	attr_accessor :connect_time
@@ -249,7 +249,7 @@ class Pending
 
 	attr_accessor :rmtaddr, :fromport
 	attr_accessor :pass, :user, :nick, :capab, :cline
-	attr_accessor :ident, :hostname
+	attr_accessor :ident, :hostname, :ip
 	attr_accessor :last_pong
 
 	def initialize(ircd, fd, rmtaddr=nil, fromport=nil)
@@ -289,6 +289,7 @@ class Pending
 		return if not @user or not @nick
 		ident = @ident || "~#{@user[1]}"
 		clt = User.new(@ircd, @nick, ident[0, 10], @hostname, @fd)
+		clt.ip = @ip
 		clt.descr = @user[4]
 		clt.ts = Time.now.to_i
 		clt.mode << 'S' if @fromport.pline[:ssl]
@@ -303,7 +304,7 @@ class Pending
 	def retrieve_hostname(verb=true)
 		sv_send 'NOTICE', 'AUTH', ':*** Looking up your hostname...' if verb
 		pa = @fd.to_io.peeraddr
-		@hostname = pa[3]
+		@ip = @hostname = pa[3]
 		Timeout.timeout(2, RuntimeError) {
 			raw = @hostname.split('.').map { |i| i.to_i }.pack('C*')
 			if pa[0] =~ /INET6/

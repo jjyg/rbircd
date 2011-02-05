@@ -567,7 +567,7 @@ class User
 				sv_send 275, @nick, u.nick, ':is using a secure connection (SSL)' if u.mode.include?('S')
 				sv_send 301, @nick, u.nick, ":#{u.away}" if u.away
 				sv_send 307, @nick, u.nick, ':has identified for this nick' if u.mode.include?('r')
-				sv_send 312, @nick, u.nick, u.servername, ":#{u.serverdescr}"
+				sv_send 312, @nick, u.nick, u.servername, ":#{u.serverdescr}#{" from #{u.ip}" if u.ip and @mode.include?('o')}"
 				sv_send 313, @nick, u.nick, ':is an IRC Operator - Service Administrator' if u.mode.include?('o')
 				sv_send 317, @nick, u.nick, (Time.now - u.last_active).to_i, u.connect_time.to_i, ':seconds idle, signon time' if u.local?
 				clist = u.chans.find_all { |c| !(c.mode.include?('p') or c.mode.include?('s')) or c.users.include?(self) or @mode.include?('o') }
