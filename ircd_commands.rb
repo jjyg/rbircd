@@ -90,7 +90,7 @@ class User
 		cmd_privmsg(l, false)
 	end
 
-	def cmd_nick(l)
+	def cmd_nick(l, force=false)
 		return if chk_parm(l, 1)
 
 		nick = l[1]
@@ -99,7 +99,7 @@ class User
 		elsif nick == @nick
 		elsif @ircd.find_user(nick) and not @ircd.streq(nick, @nick)
 			sv_send 433, @nick, nick, ':Nickname is already in use'
-		elsif cn = chans.find { |c| (c.banned?(self) or c.mode.include?('m')) and not (c.op?(self) or c.voice?(self)) }
+		elsif cn = chans.find { |c| (c.banned?(self) or c.mode.include?('m')) and not (c.op?(self) or c.voice?(self)) } and not force
 			sv_send 437, @nick, cn.name, ':Cannot change nickname while banned or moderated on channel'
 		else
 			@ts = Time.now.to_i
@@ -911,13 +911,13 @@ class User
 		if srv.purge
 		elsif not @ircd.users.empty?
 			list = @ircd.users.map { |u| u.nick }.sort
-			if l[2] == 'dryrun'
-			elsif l.length > 2
+			dryrun = l.delete_at(2) if l[2] == 'dryrun'
+			if l.length >= 2
 				list = l[2..-1]
 			end
 			n = list.pop
 			srv.purge = { :from => @nick, :list => list, :sent => [n] }
-			srv.purge[:dryrun] = true if l[2] == 'dryrun'
+			srv.purge[:dryrun] = true if dryrun
 			srv.send ":#@nick", 'WHOIS', l[1], n
 		end
 		sv_send 'NOTICE', @nick, ":Purge ongoing #{srv.purge[:list].length} - #{srv.purge[:sent].join(' ')}"
@@ -988,7 +988,7 @@ class Server
 					@ircd.add_user u
 					forward(["NICK #{u.nick} 2 #{u.ts} +i #{u.ident} #{u.hostname} #{u.servername} 0 0", u.descr], @name)
 				else
-					@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge kill badsv #{u.fqdn} (#{sn})"
+					@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge kill badsv #{wc[0, 3]*'/'} (#{sn})"
 					return if purge[:dryrun]
 					send ":#{@ircd.name} KILL #{wc[0]} :irc!#{@ircd.name} (ghost)"
 				end
@@ -1669,16 +1669,8 @@ class Server
 		newnick = l[2]
 		ts = l[3].to_i
 		if cf = @ircd.find_user(newnick) and false
-		elsif u = @ircd.find_user(nick)
-			@ircd.del_user u
-			u.nick = newnick
-			u.ts = ts
-			@ircd.add_user u
-		else
-			puts "svs nickchange from unknown user #{l.inspect} #{from.inspect}"
-			u = User.new(@ircd, newnick, nil, nil, self)
-			u.ts = ts
-			@ircd.add_user u
+		elsif u = @ircd.find_user(nick) and u.local?
+			u.cmd_nick(['NICK', newnick], true)
 		end
 	end
 end
