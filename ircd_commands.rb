@@ -849,7 +849,7 @@ class User
 	def cmd_die(l)
 		return if chk_oper(l)
 		@ircd.send_global "#@nick killed me !"
-		puts "#{Time.now} DIE by #{@fqdn}"
+		puts "#{Time.now} DIE by #{fqdn}"
 		$stdout.flush
 		exit!(0)
 	end
@@ -884,7 +884,7 @@ class User
 			return
 		end
 
-		@ircd.global "#@nick SQUIT #{l[1]}"
+		@ircd.send_global_local "#@nick SQUIT #{l[1]}"
 		srv.cleanup
 	end
 
