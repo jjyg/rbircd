@@ -204,8 +204,10 @@ class Port
 
 		if @pline[:ssl]
 			@sslctx = OpenSSL::SSL::SSLContext.new
-			@sslctx.key = OpenSSL::PKey::RSA.new(File.open(@ircd.conf.ssl_key_path))
-			@sslctx.cert = OpenSSL::X509::Certificate.new(File.open(@ircd.conf.ssl_cert_path))
+			kp = @pline[:ssl_key]  || @ircd.conf.ssl_key_path
+			cp = @pline[:ssl_cert] || @ircd.conf.ssl_cert_path
+			@sslctx.key  = File.open(kp, 'rb') { |fd| OpenSSL::PKey::RSA.new(fd) }
+			@sslctx.cert = File.open(cp, 'rb') { |fd| OpenSSL::X509::Certificate.new(fd) }
 		end
 	end
 
@@ -892,8 +894,10 @@ class Conf
 		while e = fu.shift
 			case e
 			when 'SSL'; p[:ssl] = true
+			when /^key=(.*)/; p[:ssl_key] = $1; File.open($1){}
+			when /^cert=(.*)/; p[:ssl_cert] = $1; File.open($1){}
 			when '', nil
-			else raise "P:host:port:[SSL]"
+			else raise "P:host:port:[SSL[:key=foo.pem:cert=bar.pem]]"
 			end
 		end
 		@plines << p
