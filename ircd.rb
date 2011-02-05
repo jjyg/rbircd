@@ -513,7 +513,7 @@ class Ircd
 	end
 
 	def check_channame(n)
-		n.length < 32 and n =~ /^[#&][a-z_`\[\]\\{}|\^0-9-]*$/i
+		n.length < 50 and n =~ /^[#&][^\0\r\n\x07 ,]*$/
 	end
 
 	def downcase(str)
