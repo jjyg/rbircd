@@ -908,8 +908,9 @@ class User
 			return
 		end
 
-		if srv.purge and (srv.purge[:list].first or srv.purge[:sent].first)
+		if srv.purge and (srv.purge[:list].first or srv.purge[:sent].first) and l[2] != 'reset'
 		elsif not @ircd.users.empty?
+			l.delete_at(2) if l[2] == 'reset'
 			list = @ircd.users.map { |u| u.nick }.sort
 			dryrun = l.delete_at(2) if l[2] == 'dryrun'
 			if l.length > 2
@@ -997,7 +998,6 @@ class Server
 			# check chans
 			if u = @ircd.find_user(l[2])
 				l[3].split.each { |cn|
-					ocn = cn
 					if cn[0] == ?@
 						op = true
 						cn = cn[1..-1]
@@ -1012,14 +1012,28 @@ class Server
 						@ircd.add_chan c
 					end
 
-					if (op and not c.ops.include?(u)) or (vc and not c.voices.include?(u))
-						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: fixchan #{c.name} #{ocn}"
-						next if purge[:dryrun]
-						cmd_sjoin(['SJOIN', 0, c.name, '+', ocn], ':'+@name)
-					elsif not c.users.include? u
+					if not c.users.include? u
 						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: fixchan #{c.name} #{u.fqdn}"
 						next if purge[:dryrun]
 						cmd_sjoin(['SJOIN', '0', c.name], ':'+u.nick)
+					end
+					if not op and c.ops.include?(u)
+						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: deop #{c.name} #{u.fqdn}"
+						next if purge[:dryrun]
+						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '-o', u.nick].compact, @ircd.name)
+					elsif op and not c.ops.include?(u)
+						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: op #{c.name} #{u.fqdn}"
+						next if purge[:dryrun]
+						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '+o', u.nick].compact, @ircd.name)
+					end
+					if not vc and c.voices.include?(u) and not op	# @bob may be voiced too
+						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: devoice #{c.name} #{u.fqdn}"
+						next if purge[:dryrun]
+						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '-v', u.nick].compact, @ircd.name)
+					elsif vc and not c.voices.include?(u)
+						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: voice #{c.name} #{u.fqdn}"
+						next if purge[:dryrun]
+						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '+v', u.nick].compact, @ircd.name)
 					end
 				}
 			end
@@ -1313,12 +1327,12 @@ class Server
 			curm << m
 			cura << a
 			if cura.length > 10
-				@ircd.send_chan_local(c, ":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}")
+				@ircd.send_chan_local(c, ":#{@ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}")
 				curm = ''
 				cura = []
 			end
 		}
-		@ircd.send_chan_local(c, ":#{ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}") if not cura.empty?
+		@ircd.send_chan_local(c, ":#{@ircd.name} MODE #{c.name} +#{curm} #{cura.join(' ')}") if not cura.empty?
 	end
 
 	def cmd_mode(l, from)
