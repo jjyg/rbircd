@@ -736,16 +736,31 @@ class Ircd
 
 	# read a line byte by byte
 	def fd_gets(fd, maxlen=512)
-		l = ''
-		while (fd.respond_to?(:pending) and fd.pending > 0) or IO.select([fd], nil, nil, 0.01)	# yay OpenSSL
-			return if not c = fd.read(1)
+		@fd_lines ||= {}
+
+		if @fd_lines.length > 10
+			tnow = Time.now.to_i
+			@fd_lines.delete_if { |f, (t, l)| t < tnow - 5 }
+		end
+
+		if c = @fd_lines.delete(fd)
+			l = c[1]
+		else
+			l = ''
+		end
+
+		while (fd.respond_to?(:pending) and fd.pending > 0) or IO.select([fd], nil, nil, 0)
+			break if not c = fd.read(1)
 			return if l.length > maxlen*8
-			break if c == "\n"
+			if c == "\n"
+				l = l[0, maxlen].chomp
+				puts "> #{l}" if $DEBUG
+				return l
+			end
 			l << c
 		end
-		l = l[0, maxlen].chomp
-		puts "> #{l}" if $DEBUG
-		l
+		@fd_lines[fd] = [(tnow || Time.now.to_i), l]
+		nil
 	rescue
 		r = fd_to_recv(fd)
 		puts "#{Time.now} fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}"
