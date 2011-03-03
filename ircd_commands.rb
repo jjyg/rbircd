@@ -1691,6 +1691,7 @@ end
 
 class Pending
 	def handle_command(l)
+		return cleanup if l !~ /^\w*$/
 		msg = "cmd_#{l[0].to_s.downcase}"
 		if respond_to? msg
 			__send__ msg, l
