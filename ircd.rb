@@ -760,7 +760,7 @@ class Ircd
 			l << c
 		end
 		@fd_lines[fd] = [(tnow || Time.now.to_i), l]
-		nil
+		''
 	rescue
 		r = fd_to_recv(fd)
 		puts "#{Time.now} fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}"
