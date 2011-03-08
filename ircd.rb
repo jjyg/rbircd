@@ -750,7 +750,7 @@ class Ircd
 		end
 
 		while (fd.respond_to?(:pending) and fd.pending > 0) or IO.select([fd], nil, nil, 0)
-			break if not c = fd.read(1)
+			return if not c = fd.read(1)
 			return if l.length > maxlen*8
 			if c == "\n"
 				l = l[0, maxlen].chomp
