@@ -1071,7 +1071,7 @@ class Server
 	end
 
 	def send_chanmode(user, chan, model)
-		send ":#{user.nick} MODE #{chan.name} #{0} #{model}"
+		send ":#{user.nick} MODE #{chan.name} #{chan.ts if @ts_delta} #{model}"
 	end
 
 	# send a client join channel notification
@@ -1110,8 +1110,12 @@ class Server
 		@ircd.chans.each { |c|
 			next if c.name[0] == ?&
 			send_topic(c)
+			ts = @ts_delta ? cur_ts(c.ts) : ''
 			c.bans.each { |b|
-				# TODO
+				sv_send 'MODE', c.name, ts, '+b', b[:mask]
+			}
+			c.banexcept.each { |e|
+				sv_send 'MODE', c.name, ts, '+e', e[:mask]
 			}
 		}
 		@ircd.users.each { |u|
@@ -1386,7 +1390,7 @@ class Server
 						who = who[1..-1]
 						who = @ircd.find_user(who).fqdn if @ircd.find_user(who)
 					end
-					list << { :mask => mask, :who => who, :when => ts }
+					list << { :mask => mask, :who => who, :when => Time.now.to_i }
 				else next
 				end
 			else
