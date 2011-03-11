@@ -772,7 +772,7 @@ class User
 	end
 
 	def cmd_nickserv(l)
-		cmd_privmsg ['PRIVMSG', l[0], l[1]]
+		cmd_privmsg ['PRIVMSG', l[0], l[1..-1].join(' ')]
 	end
 	def cmd_identify(l)
 		cmd_privmsg ['PRIVMSG', 'nickserv', l.join(' ')]
