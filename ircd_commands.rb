@@ -293,9 +293,13 @@ class User
 			when '+', '-'; minus = (m == '-') ; next
 			when 'b', 'e', 'I'	# bans/excepts
 				if not parm = params.shift
-					list = (m == 'b' ? chan.bans : m == 'e' ? chan.banexcept : chan.invexcept)
-					list.each { |b| sv_send 367, @nick, chan.name, b[:mask], b[:who], b[:when] }
-					sv_send 368, @nick, chan.name, ":End of channel #{m == 'b' ? 'ban' : 'except'} list"
+					stuff = case m
+						when 'I'; { :list => chan.invexcept, :nr => 346, :name => 'invite' }
+						when 'e'; { :list => chan.banexcept, :nr => 348, :name => 'exempt' }
+						when 'b'; { :list => chan.bans,      :nr => 367, :name => 'ban'    }
+						end
+					stuff[:list].each { |b| sv_send stuff[:nr], @nick, chan.name, b[:mask], b[:who], b[:when] }
+					sv_send stuff[:nr]+1, @nick, chan.name, ":End of channel #{stuff[:name]} list"
 					next
 				end
 			when 'k', 'o', 'v'; params.shift
@@ -321,10 +325,14 @@ class User
 			when '+'; minus = false; next
 			when '-'; minus = true;  next
 			when 'b', 'e', 'I'	# bans/excepts
-				list = (m == 'b' ? chan.bans : m == 'e' ? chan.banexcept : chan.invexcept)
+				stuff = case m
+					when 'I'; { :list => chan.invexcept, :nr => 346, :name => 'invite' }
+					when 'e'; { :list => chan.banexcept, :nr => 348, :name => 'exempt' }
+					when 'b'; { :list => chan.bans,      :nr => 367, :name => 'ban'    }
+					end
 				if not parm = params.shift
-					list.each { |b| sv_send 367, @nick, chan.name, b[:mask], b[:who], b[:when] }
-					sv_send 368, @nick, chan.name, ":End of channel #{m == 'b' ? 'ban' : 'except'} list"
+					stuff[:list].each { |b| sv_send stuff[:nr], @nick, chan.name, b[:mask], b[:who], b[:when] }
+					sv_send stuff[:nr]+1, @nick, chan.name, ":End of channel #{stuff[:name]} list"
 					next
 				end
 				parm = parm + '!*' if not parm.include?('!') and not parm.include?('@')
@@ -332,9 +340,9 @@ class User
 				parm = '*!' + parm if not parm.include?('!')
 				parm = parm + '@*' if not parm.include?('@')
 				if minus
-					list.delete_if { |b| @ircd.streq(b[:mask], parm) }
-				elsif not list.find { |b| @ircd.streq(b[:mask], parm) }
-					list << { :mask => parm, :who => fqdn, :when => Time.now.to_i }
+					stuff[:list].delete_if { |b| @ircd.streq(b[:mask], parm) }
+				elsif not stuff[:list].find { |b| @ircd.streq(b[:mask], parm) }
+					stuff[:list] << { :mask => parm, :who => fqdn, :when => Time.now.to_i }
 				else next
 				end
 			when 'k'	# key
