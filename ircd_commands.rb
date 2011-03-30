@@ -146,7 +146,7 @@ class User
 			elsif not inv and chan.limit and chan.limit <= chan.users.length
 				sv_send 471, @nick, channame, ':Cannot join chan (+l)'
 			elsif not inv and chan.mode.include? 'i' and
-					not chan.banexcept.find { |e| @ircd.match_mask(e[:mask], fqdn) }
+					not chan.invexcept.find { |e| @ircd.match_mask(e[:mask], fqdn) }
 				sv_send 473, @nick, channame, ':Cannot join chan (+i)'
 			elsif not inv and chan.banned?(self)
 				sv_send 474, @nick, channame, ':Cannot join chan (+b)'
@@ -154,7 +154,6 @@ class User
 				sv_send 475, @nick, channame, ':Cannot join chan (+k)'
 			else
 				chan.invites.delete inv if inv
-				# XXX chan.ts = Time.now.to_i
 				chan.users << self
 				@ircd.servers.each { |s| s.send_join(self, chan) } if channame[0] != ?&
 				@ircd.send_chan_local(chan, ":#{fqdn} JOIN :#{channame}")
@@ -292,9 +291,9 @@ class User
 		l[2].split(//).each { |m|
 			case m
 			when '+', '-'; minus = (m == '-') ; next
-			when 'b', 'e'	# bans/excepts
+			when 'b', 'e', 'I'	# bans/excepts
 				if not parm = params.shift
-					list = (m == 'b' ? chan.bans : chan.banexcept)
+					list = (m == 'b' ? chan.bans : m == 'e' ? chan.banexcept : chan.invexcept)
 					list.each { |b| sv_send 367, @nick, chan.name, b[:mask], b[:who], b[:when] }
 					sv_send 368, @nick, chan.name, ":End of channel #{m == 'b' ? 'ban' : 'except'} list"
 					next
@@ -321,8 +320,8 @@ class User
 			case m
 			when '+'; minus = false; next
 			when '-'; minus = true;  next
-			when 'b', 'e'	# bans/excepts
-				list = (m == 'b' ? chan.bans : chan.banexcept)
+			when 'b', 'e', 'I'	# bans/excepts
+				list = (m == 'b' ? chan.bans : m == 'e' ? chan.banexcept : chan.invexcept)
 				if not parm = params.shift
 					list.each { |b| sv_send 367, @nick, chan.name, b[:mask], b[:who], b[:when] }
 					sv_send 368, @nick, chan.name, ":End of channel #{m == 'b' ? 'ban' : 'except'} list"
@@ -1117,6 +1116,9 @@ class Server
 			c.banexcept.each { |e|
 				sv_send 'MODE', c.name, ts, '+e', e[:mask]
 			}
+			c.invexcept.each { |e|
+				sv_send 'MODE', c.name, ts, '+I', e[:mask]
+			}
 		}
 		@ircd.users.each { |u|
 			next if not u.away
@@ -1380,8 +1382,8 @@ class Server
 				end
 			when 'l'; c.limit = (minus ? nil : margs.shift.to_i) 
 			when 'k'; k = margs.shift; c.key = (minus ? nil : k)
-			when 'b', 'e'
-				list = (m == 'b' ? c.bans : c.banexcept)
+			when 'b', 'e', 'I'
+				list = (m == 'b' ? c.bans : m == 'e' ? c.banexcept : c.invexcept)
 				mask = margs.shift
 				if minus
 					list.delete_if { |b| @ircd.streq(b[:mask], mask) }

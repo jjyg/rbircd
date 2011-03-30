@@ -396,7 +396,7 @@ class Channel
 	# lists of User (one User can be in multiple lists)
 	attr_accessor :users, :ops, :voices
 	# list of ban masks { :mask => '*!*@lol.com', :who => 'foo!bar@baz.quux', :when => 1234222343 }
-	attr_accessor :bans, :banexcept
+	attr_accessor :bans, :banexcept, :invexcept
 	# same as ban masks, with :user instead of :mask (=> User)
 	attr_accessor :invites
 	attr_accessor :ts
@@ -410,6 +410,7 @@ class Channel
 		@voices = []
 		@bans = []
 		@banexcept = []
+		@invexcept = []
 		@invites = []
 	end
 
