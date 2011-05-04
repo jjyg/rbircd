@@ -5,7 +5,7 @@ class User
 			@last_pong = Time.now.to_f
 			__send__ msg, l
 		else
-			puts "unhandled user #{fqdn} #{l.inspect}"
+			puts "#{Time.now} unhandled user #{fqdn} #{l.inspect}"
 			$stdout.flush
    			sv_send 421, @nick, l[0], ':unknown command'
 		end
@@ -957,7 +957,7 @@ class Server
 			u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
 			forward(['KILL', l[2], "irc!#{l[1]} (collision)"], @name)
 		else
-			puts "unhandled server #{l.inspect} #{from.inspect}"
+			puts "#{Time.now} unhandled server #{l.inspect} #{from.inspect}"
 		end
 	end
 
@@ -1711,7 +1711,7 @@ class Pending
 		if respond_to? msg
 			__send__ msg, l
 		else
-			puts "unhandled pending #{l.inspect}"
+			puts "#{Time.now} unhandled pending #{l.inspect}"
 		end
 	end
 

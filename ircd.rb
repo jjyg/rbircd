@@ -170,6 +170,11 @@ class Server
 	end
 
 	def cleanup
+		if defined?(@cleaningup) and @cleaningup
+			puts "#{Time.now} recursive sv cleanup", caller
+			return
+		end
+		@cleaningup = true
 		puts "#{Time.now} sv #{@name} cleanup"
 		@ircd.servers.delete self
 		oldu = @ircd.users.find_all { |u| u.from_server == self }
