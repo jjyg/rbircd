@@ -300,7 +300,11 @@ class Pending
 	def check_conn
 		return if not @user or not @nick
 		ident = @ident || "~#{@user[1]}"
-		clt = User.new(@ircd, @nick, ident[0, 10], @hostname, @fd)
+		hostname = @hostname
+		if @ircd.conf.cloak_users
+			hostname = Digest::MD5.hexdigest(hostname).downcase[0, 16] + '.fu'
+		end
+		clt = User.new(@ircd, @nick, ident[0, 10], hostname, @fd)
 		clt.ip = @ip
 		clt.descr = @user[4]
 		clt.ts = Time.now.to_i
@@ -850,6 +854,7 @@ class Conf
 	attr_accessor :max_chan_mode_cmd	# max chan mode change per /mode command
 	attr_accessor :logfile
 	attr_accessor :whowas
+	attr_accessor :cloak_users
 
 	def initialize
 		@plines = []
@@ -866,6 +871,7 @@ class Conf
 		@user_chan_limit = 25
 		@max_chan_mode_cmd = 6
 		@whowas = { :maxlen => 5000, :maxdup => 9, :maxage => 3600*24*32 }
+		#@cloak_users = true
 	end
 
 	def load(filename)
