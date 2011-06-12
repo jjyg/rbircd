@@ -229,7 +229,7 @@ class Port
 			afd = accept_ssl(afd) if @pline[:ssl]
 			@ircd.pending << Pending.new(ircd, afd, self)
 		}
-	rescue Timeout::Error
+	rescue Timeout::Error, OpenSSL::SSL::SSLError
 		# dont care
 	rescue
 		puts "#{Time.now} #{$!.class} #{$!.message}", $!.backtrace, ''
