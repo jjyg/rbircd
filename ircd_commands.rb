@@ -1024,23 +1024,24 @@ class Server
 						next if purge[:dryrun]
 						cmd_sjoin(['SJOIN', '0', c.name], ':'+u.nick)
 					end
+					ts = 0 if @ts_delta
 					if not op and c.ops.include?(u)
 						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: deop #{c.name} #{u.fqdn}"
 						next if purge[:dryrun]
-						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '-o', u.nick].compact, @ircd.name)
+						cmd_mode(['MODE', c.name, ts, '-o', u.nick].compact, @ircd.name)
 					elsif op and not c.ops.include?(u)
 						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: op #{c.name} #{u.fqdn}"
 						next if purge[:dryrun]
-						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '+o', u.nick].compact, @ircd.name)
+						cmd_mode(['MODE', c.name, ts, '+o', u.nick].compact, @ircd.name)
 					end
 					if not vc and c.voices.include?(u) and not op	# @bob may be voiced too
 						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: devoice #{c.name} #{u.fqdn}"
 						next if purge[:dryrun]
-						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '-v', u.nick].compact, @ircd.name)
+						cmd_mode(['MODE', c.name, ts, '-v', u.nick].compact, @ircd.name)
 					elsif vc and not c.voices.include?(u)
 						@ircd.find_user(purge[:from]).sv_send 'NOTICE', purge[:from], ":Purge: voice #{c.name} #{u.fqdn}"
 						next if purge[:dryrun]
-						cmd_mode(['MODE', c.name, (c.ts if @ts_delta), '+v', u.nick].compact, @ircd.name)
+						cmd_mode(['MODE', c.name, ts, '+v', u.nick].compact, @ircd.name)
 					end
 				}
 			end
@@ -1078,7 +1079,8 @@ class Server
 	end
 
 	def send_chanmode(user, chan, model)
-		send ":#{user.nick} MODE #{chan.name} #{chan.ts if @ts_delta} #{model}"
+		# 0 should be cur_ts(chan.ts), but peer may reject the mode...
+		send ":#{user.nick} MODE #{chan.name} #{0 if @ts_delta} #{model}"
 	end
 
 	# send a client join channel notification
@@ -1117,7 +1119,7 @@ class Server
 		@ircd.chans.each { |c|
 			next if c.name[0] == ?&
 			send_topic(c)
-			ts = @ts_delta ? cur_ts(c.ts) : ''
+			ts = @ts_delta ? 0 : ''
 			c.bans.each { |b|
 				sv_send 'MODE', c.name, ts, '+b', b[:mask]
 			}
