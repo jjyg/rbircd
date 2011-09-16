@@ -7,12 +7,12 @@ Use at your own risks !
 Also, when using one rbircd server in your irc network, you may introduce arbitrary flaws for the whole network !
 
 
-To launch the daemon, you can run
+To launch the daemon, you can run (foreground)
  ruby -r ircd -e 'Ircd.run("my_config.txt")'
-or
+or (background)
  ruby -r ircd -e 'Ircd.run_bg("my_config.txt", "irc_log.txt")'
 
-The server will reload its source/configuration on SIGHUP
+The server will reload its source/configuration on SIGHUP, or on the 'REHASH' command from an oper.
 
 The server is controlled through a configuration file, here is a sample:
 
@@ -22,23 +22,29 @@ M:rb.ircd.net:my sexy server
 
 # listening ports
 P:127.0.0.1:6667
-# accept SSL connections
+# listen, waiting for SSL connections
 P:127.0.0.1:7000:SSL
+# another SSL port, with a specific key/cert
+P:127.0.0.1:8000:SSL:key=foo_pkey.pem:cert=foo_cert.pem
 # ipv6
 P:[::1]:6667
 
 # link to other ircds
 # ZIP not supported
+# Warning: this protocol sucks, you should use SSL if possible
 C:some.server.name:1.2.3.4:7001:mypassw0rd:RC4
 
 # operator identifier : mask : pass hash : user mode
 # use oper_mkpass.rb to generate the hash
 O:jj:*!bla@trusted.computing.lulz:1234$5678:oa
+
+# require users to send the 'PASS foo' command on connection
+PASS:foo
 ----- snip -----
 
-More specific tweaks should be done in the source itself, especially the Conf class (holds ping timeout delays, ssl cert/key paths, etc)
+More specific tweaks should be done in the source itself, especially the Conf class (ping timeout delays, etc)
 
-IRC commands are in ircd_commands.rb (duh)
+All IRC command implementation are in ircd_commands.rb (duh)
 
 
 KTHXBAI

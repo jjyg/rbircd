@@ -301,6 +301,12 @@ class Pending
 		return if not @user or not @nick
 		ident = @ident || "~#{@user[1]}"
 		hostname = @hostname
+		if @ircd.conf.user_pass and @pass != @ircd.conf.user_pass
+			puts "#{Time.now} bad password from #{@nick}!#{ident}@#{hostname}"
+			# sv_send "bad pass"
+			cleanup
+			return
+		end
 		if @ircd.conf.cloak_users
 			hostname = Digest::MD5.hexdigest(hostname).downcase[0, 16] + '.fu'
 		end
@@ -855,6 +861,7 @@ class Conf
 	attr_accessor :logfile
 	attr_accessor :whowas
 	attr_accessor :cloak_users
+	attr_accessor :user_pass	# required client PASS
 
 	def initialize
 		@plines = []
@@ -877,12 +884,13 @@ class Conf
 	def load(filename)
 		File.read(filename).each_line { |l|
 			l = l.strip
-			case l[0]
-			when ?M; n, @name, @descr = l.split(':', 3)
-			when ?P; parse_p_line(l)
-			when ?C; parse_c_line(l)
-			when ?O; parse_o_line(l)
-			when ?#
+			case l.split(':', 2)[0]
+			when 'M'; n, @name, @descr = l.split(':', 3)
+			when 'P'; parse_p_line(l)
+			when 'C'; parse_c_line(l)
+			when 'O'; parse_o_line(l)
+			when 'PASS'; @user_pass = l.split(':', 2)[1]
+			when /^#/
 			when nil
 			else raise "Unknown configuration line #{l.inspect}"
 			end
