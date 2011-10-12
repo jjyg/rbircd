@@ -724,7 +724,7 @@ class User
 				list.find_all { |u|
 					a = arg.split(//)
 					a &= %w[o O a A S] if not @mode.include?('o')
-					(a & u.modes.split(//)).sort == a.sort
+					(a & u.mode.split(//)).sort == a.sort
 				}
 			when 'n'; list.find_all { |u| @ircd.match_mask(arg, u.nick) }
 			when 's'
