@@ -148,7 +148,14 @@ class Server
 	def self.sconnect(ircd, cline)
 		ircd.send_global("Routing - connection from #{ircd.name} to #{cline[:name]} activated")
 		p = Timeout.timeout(4) {
-			Pending.new(ircd, TCPSocket.open(cline[:host], cline[:port]))
+			sock = TCPSocket.open(cline[:host], cline[:port])
+			if cline[:ssl]
+				sock = OpenSSL::SSL::SSLSocket.new(sock, OpenSSL::SSL::SSLContext.new)
+				sock.sync = true
+				sock.connect
+				def sock.pending; @rbuffer.to_s.length + super() end
+			end
+			Pending.new(ircd, sock)
 		}
 		p.sconnect(cline)
 		ircd.pending << p
@@ -968,6 +975,7 @@ class Conf
 			case e
 			when 'RC4'; c[:rc4] = true
 			#when 'ZIP'; c[:zip] = true	# XXX unsupported
+			when 'SSL'; c[:ssl] = true	# only used for outgoing cx ; TODO cert checks
 			when /^\d+$/; c[:delay] = e.to_i
 			when '', nil
 			else raise "C:host:[port]:pass:[RC4]:[ZIP]:[delay]"
