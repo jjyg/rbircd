@@ -895,7 +895,7 @@ class Conf
 		@ping_timeout = 180
 		@ssl_key_path = 'ssl_key.pem'
 		@ssl_cert_path = 'ssl_cert.pem'
-		@user_chan_limit = 25
+		@user_chan_limit = 50
 		@max_chan_mode_cmd = 6
 		@whowas = { :maxlen => 5000, :maxdup => 9, :maxage => 3600*24*32 }
 		#@cloak_users = true
