@@ -120,7 +120,12 @@ class User
 	end
 
 	def send_welcome
-		sv_send '001', @nick, ":Welcome to the RB IRC Network #{fqdn}"
+		sv_send '001', @nick, ":Welcome to the #{@ircd.conf.network_name} IRC Network #{fqdn}"
+		sv_send '002', @nick, ":Your host is #{@ircd.name}, running version #{@ircd.version}"
+		sv_send '003', @nick, ":This server was created #{@ircd.creation_time}"
+		umodes = 'igwoaSrd'.unpack('C*').sort.pack('C*')
+		cmodes = 'beIklovrcimnpst'.unpack('C*').sort.pack('C*')
+		sv_send '004', @nick, "#{@ircd.name} #{@ircd.version} #{umodes} #{cmodes}"
 		cmd_motd ['MOTD']
 		cmd_mode ['MODE', @nick, '+i']
 	end
@@ -479,12 +484,20 @@ class Ircd
 		@clines_timeout = @conf.clines.map { |c| { :last_try_sconnect => Time.now.to_f, :cline => c } if c[:port] }.compact if @conffile
 	end
 
+	def creation_time
+		@creation_time ||= Time.now
+	end
+
 	def name
 		@conf.name
 	end
 
 	def descr
 		@conf.descr
+	end
+
+	def version
+		"rbircd-0.0.28"
 	end
 
 	def rehash
@@ -852,7 +865,7 @@ end
 # set of configuration parameters
 class Conf
 	# our server name
-	attr_accessor :name, :descr
+	attr_accessor :network_name, :name, :descr
 	# list of { :host => '1.2.3.4', :port => 6667, :ssl => true }
 	attr_accessor :plines
 	# list of { :nick => 'lol' (OPER command param), :mask => '*!blabla@*', :pass => '123$1azde2', :mode => 'oOaARD' }
@@ -892,6 +905,7 @@ class Conf
 		File.read(filename).each_line { |l|
 			l = l.strip
 			case l.split(':', 2)[0]
+			when 'N'; n, @network_name = l.split(':', 2)
 			when 'M'; n, @name, @descr = l.split(':', 3)
 			when 'P'; parse_p_line(l)
 			when 'C'; parse_c_line(l)
@@ -902,6 +916,9 @@ class Conf
 			else raise "Unknown configuration line #{l.inspect}"
 			end
 		}
+
+		# network_name default to name tld
+		@network_name ||= @name[/[^.]*\.[^.]*$/] || @name
 	end
 
 	# split a line at :, except inside [] (for ipv6 numeric addrs)
