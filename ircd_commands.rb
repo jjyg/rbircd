@@ -935,6 +935,7 @@ end
 class Server
 	attr_accessor :purge
 	def handle_command(l, from)
+		return if l.empty?
 		msg = "cmd_#{l[0].to_s.downcase}"
 		if respond_to? msg
 			@last_pong = Time.now.to_f
