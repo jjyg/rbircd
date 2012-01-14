@@ -353,9 +353,8 @@ class User
 			when 'l'	# limit
 				if minus; chan.limit = nil
 				elsif parm = params.shift
-					parm = parm.to_i
-					next if parm == 0
-					chan.limit = parm
+					next if parm.to_i == 0
+					chan.limit = parm.to_i
 				else
 					sv_send 461, @nick, 'MODE', '+l', ':Not enough parameters'
 					next
