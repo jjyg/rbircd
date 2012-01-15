@@ -15,7 +15,7 @@ module HasSock
 		puts "< #{msg}" if $DEBUG
 		@fd.write msg
 	rescue
-		puts "#{Time.now} #{respond_to?(:fqdn) ? fqdn : self} #{$!.class} #{$!.message}"
+		puts "#{Time.now} hs.send #{self.class} #{respond_to?(:fqdn) ? fqdn : self} #{$!.class} #{$!.message}"
 		cleanup if respond_to?(:cleanup)
 	end
 
@@ -89,7 +89,7 @@ class User
 			handle_line(@ircd.split_line(l))
 		end
 	rescue
-		puts "#{Time.now} u #{fqdn} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
+		puts "#{Time.now} user.canread #{fqdn} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
 	end
 
 	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection", sendservers = true, cleanchans = true)
@@ -115,7 +115,7 @@ class User
 		puts "< #{msg}" if $DEBUG
 		(fd || from_server.fd).write msg
 	rescue
-		puts "#{Time.now} #{fqdn} #{$!.class} #{$!.message}"
+		puts "#{Time.now} user.send #{fqdn} #{$!.class} #{$!.message}"
 		cleanup ":#{fqdn} QUIT :Broken pipe" if fd
 	end
 
@@ -168,7 +168,7 @@ class Server
 		ircd.send_global "Routing - connection to #{cline[:name]} timed out"
 	rescue
 		ircd.send_global "Routing - connection to #{cline[:name]} refused (#{$!.message})"
-		puts "#{Time.now} #{$!.class} #{$!.message}", $!.backtrace, ''
+		puts "#{Time.now} sv.sconnect #{cline[:name]} #{$!.class} #{$!.message}", $!.backtrace, ''
 	end
 
 	def can_read
@@ -178,7 +178,7 @@ class Server
 			handle_line(@ircd.split_line(l))
 		end
 	rescue
-		puts "#{Time.now} sv #{@name} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
+		puts "#{Time.now} sv.canread #{@name} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
 	end
 
 	def cleanup
@@ -195,6 +195,7 @@ class Server
 		oldu.each { |u| u.cleanup ":#{u.fqdn} QUIT :#{@ircd.name} #{name}", true, false }
 		@ircd.clean_chans
 		@fd.to_io.close rescue nil
+		@cleaningup = false
 	end
 
 	def handle_line(l)
@@ -244,7 +245,7 @@ class Port
 	rescue Timeout::Error, OpenSSL::SSL::SSLError
 		# dont care
 	rescue
-		puts "#{Time.now} #{$!.class} #{$!.message}", $!.backtrace, ''
+		puts "#{Time.now} port.canread #{@pline[:host]} #{@pline[:port]} #{$!.class} #{$!.message}", $!.backtrace, ''
 	end
 
 	def accept_ssl(fd)
@@ -293,7 +294,7 @@ class Pending
 			handle_line(@ircd.split_line(l))
 		end
 	rescue
-		puts "#{Time.now} pd #{@nick} #{@hostname} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
+		puts "#{Time.now} pend.canread #{@nick} #{@hostname} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
 	end
 
 	def cleanup
@@ -693,7 +694,7 @@ class Ircd
 		check_timeouts
 		wait_sockets
 	rescue
-		puts "#{Time.now} #{$!.class} #{$!.message}", $!.backtrace, ''
+		puts "#{Time.now} ircd.mainiter #{$!.class} #{$!.message}", $!.backtrace, ''
 		sleep 0.4
 	end
 
@@ -799,7 +800,7 @@ class Ircd
 		''
 	rescue
 		r = fd_to_recv(fd)
-		puts "#{Time.now} fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}"
+		puts "#{Time.now} ircd.fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}"
 	end
 
 	# ":abc d e f :g h"  =>  [":abc", "d", "e", "f", "g h"]
@@ -837,6 +838,7 @@ class Ircd
 			$stdout.reopen File.open(logfile, 'a')
 			$stderr.reopen $stdout
 		end
+		puts "#{Time.now} run"
 		ircd = new(conffile)
 		ircd.startup
 		trap('HUP') { ircd.rehash }
@@ -855,6 +857,7 @@ class Ircd
 
 		$stdout.reopen log
 		$stderr.reopen $stdout
+		puts "#{Time.now} run_bg"
 		trap('HUP') { ircd.rehash }
 		ircd.conf.logfile = logfile
 		ircd.main_loop
