@@ -771,6 +771,16 @@ class User
 		sv_send 303, @nick, ":#{list.join(' ')}"
 	end
 
+	def cmd_version(l)
+		if l[1]
+			# TODO query remote servers
+   			sv_send 421, @nick, l[0], ':unknown command'
+		else
+			# 351 nick version.debug srvname :comments
+			sv_send 351, @nick, "#{@ircd.version}.", "#{@ircd.name}", ":on your nose"
+		end
+	end
+
 	def cmd_wallops(l)
 		return if chk_parm(l, 1)
 
