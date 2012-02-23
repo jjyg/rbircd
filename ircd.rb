@@ -124,7 +124,7 @@ class User
 		sv_send '002', @nick, ":Your host is #{@ircd.name}, running version #{@ircd.version}"
 		sv_send '003', @nick, ":This server was created #{@ircd.creation_time}"
 		umodes = 'igwoaSrd'.unpack('C*').sort.pack('C*')
-		cmodes = 'beIklovrcimnpst'.unpack('C*').sort.pack('C*')
+		cmodes = 'beIklovrcimnpstS'.unpack('C*').sort.pack('C*')
 		sv_send '004', @nick, "#{@ircd.name} #{@ircd.version} #{umodes} #{cmodes}"
 		cmd_motd ['MOTD']
 		cmd_mode ['MODE', @nick, '+i']

@@ -145,13 +145,15 @@ class User
 				sv_send 405, @nick, channame, ':You have joined too many channels'
 			elsif not inv and chan.limit and chan.limit <= chan.users.length
 				sv_send 471, @nick, channame, ':Cannot join chan (+l)'
-			elsif not inv and chan.mode.include? 'i' and
+			elsif not inv and chan.mode.include?('i') and
 					not chan.invexcept.find { |e| @ircd.match_mask(e[:mask], fqdn) }
 				sv_send 473, @nick, channame, ':Cannot join chan (+i)'
 			elsif not inv and chan.banned?(self)
 				sv_send 474, @nick, channame, ':Cannot join chan (+b)'
 			elsif not inv and chan.key and l[2] != chan.key
 				sv_send 475, @nick, channame, ':Cannot join chan (+k)'
+			elsif not inv and chan.mode.include?('S') and not @mode.include?('S')
+				sv_send 488, @nick, ':SSL Only channel (+S), You must connect using SSL to join this channel.'
 			else
 				chan.invites.delete inv if inv
 				chan.users << self
@@ -374,7 +376,7 @@ class User
 				end
 			when 'r'	# registered - not user-set
 				next
-			when 'c', 'i', 'm', 'n', 'p', 's', 't'
+			when 'c', 'i', 'm', 'n', 'p', 's', 't', 'S'
 				if minus
 					chan.mode.delete! m
 				elsif not chan.mode.include?(m)
