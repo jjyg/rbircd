@@ -128,6 +128,7 @@ class User
 		sv_send '004', @nick, "#{@ircd.name} #{@ircd.version} #{umodes} #{cmodes}"
 		cmd_motd ['MOTD']
 		cmd_mode ['MODE', @nick, '+i']
+		send ":#@nick MODE #@nick :+S" if @mode.include? 'S'
 	end
 end
 
