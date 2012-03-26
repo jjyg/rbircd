@@ -13,7 +13,7 @@ module Bignum_ops
 		ret
 	end
 
-	SMALL_PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+	SMALL_PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31] unless defined? SMALL_PRIMES
 
 	# miller rabin probabilistic primality test
 	# t = 3 adequate for n > 1000, smaller are found in SMALL_PRIMES
