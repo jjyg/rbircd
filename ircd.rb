@@ -126,6 +126,11 @@ class User
 		umodes = 'igwoaSrd'.unpack('C*').sort.pack('C*')
 		cmodes = 'beIklovrcimnpstS'.unpack('C*').sort.pack('C*')
 		sv_send '004', @nick, "#{@ircd.name} #{@ircd.version} #{umodes} #{cmodes}"
+		#:sv.moo.net 005 x NETWORK=moo.net SAFELIST MAXBANS=100 MAXCHANNELS=100 CHANNELLEN=32 KICKLEN=307 NICKLEN=30 TOPICLEN=307 MODES=6 CHANTYPES=# CHANLIMIT=#:100 PREFIX=(ov)@+ STATUSMSG=@+ :are available on this server
+		#:sv.moo.net 005 x CASEMAPPING=ascii WATCH=128 SILENCE=10 ELIST=cmntu EXCEPTS INVEX CHANMODES=beI,k,jl,cimMnOprRst MAXLIST=b:100,e:45,I:45 TARGMAX=DCCALLOW:,JOIN:,KICK:4,KILL:20,NOTICE:20,PART:,PRIVMSG:20,WHOIS:,WHOWAS: :are available on this server
+		sv_send '005', @nick, "NETWORK=#{@ircd.conf.network_name} CHANNELLEN=#{@ircd.conf.max_channame_len} " +
+			"NICKLEN=#{@ircd.conf.max_nickname_len} MODES=#{@ircd.conf.max_chan_mode_cmd} CHANTYPES=#& " +
+			"CHANLIMIT=#:100 PREFIX=(ov)@+ CASEMAPPING=ascii :available on this server"
 		cmd_motd ['MOTD']
 		cmd_mode ['MODE', @nick, '+i']
 		send ":#@nick MODE #@nick :+S" if @mode.include? 'S'
@@ -153,7 +158,7 @@ class Server
 
 	def self.sconnect(ircd, cline)
 		ircd.send_global("Routing - connection from #{ircd.name} to #{cline[:name]} activated")
-		p = Timeout.timeout(4) {
+		pend = Timeout.timeout(4) {
 			sock = TCPSocket.open(cline[:host], cline[:port])
 			if cline[:ssl]
 				sock = OpenSSL::SSL::SSLSocket.new(sock, OpenSSL::SSL::SSLContext.new)
@@ -163,8 +168,8 @@ class Server
 			end
 			Pending.new(ircd, sock)
 		}
-		p.sconnect(cline)
-		ircd.pending << p
+		pend.sconnect(cline)
+		ircd.pending << pend
 	rescue Timeout::Error
 		ircd.send_global "Routing - connection to #{cline[:name]} timed out"
 	rescue
@@ -557,11 +562,11 @@ class Ircd
 
 	# checks that a nickname is valid (no forbidden characters)
 	def check_nickname(n)
-		n.length < 32 and n =~ /^[a-z_`\[\]\\{}|\^][a-z_`\[\]\\{}|\^0-9-]*$/i
+		n.length < conf.max_nickname_len and n =~ /^[a-z_`\[\]\\{}|\^][a-z_`\[\]\\{}|\^0-9-]*$/i
 	end
 
 	def check_channame(n)
-		n.length < 50 and n =~ /^[#&][^\0\r\n\x07 ,]*$/
+		n.length < conf.max_channame_len and n =~ /^[#&][^\0\r\n\x07 ,]*$/
 	end
 
 	def downcase(str)
@@ -575,9 +580,9 @@ class Ircd
 	def find_user(nick) u = @user[downcase(nick)]; u if u.kind_of?(User) end
 	def find_chan(name) @chan[downcase(name)] end
 	def add_user(user)
-		if p = @user[downcase(user.nick)]
-			p.send 'ERROR :Closing Link: 0.0.0.0 (Overridden)'
-			p.cleanup
+		if old = @user[downcase(user.nick)]
+			old.send 'ERROR :Closing Link: 0.0.0.0 (Overridden)'
+			old.cleanup
 		end
 	       	@user[downcase(user.nick)] = user
 	end
@@ -670,17 +675,17 @@ class Ircd
 
 	def startup
 		# close old ports no longer in conf (close first to allow reuse)
-		@ports.dup.each { |p|
-			next if @conf.plines.find { |pp| p.pline == pp }
-			p.cleanup
+		@ports.dup.each { |port|
+			next if @conf.plines.find { |pline| port.pline == pline }
+			port.cleanup
 		}
 
 		# open new ports from conf
-		@conf.plines.each { |p|
-			next if @ports.find { |pp| pp.pline == p }
-			fd = TCPServer.open(p[:host], p[:port])
-			puts "#{Time.now} listening on #{p[:host]}:#{p[:port]}#{' (ssl)' if p[:ssl]}"
-			@ports << Port.new(self, fd, p)
+		@conf.plines.each { |pline|
+			next if @ports.find { |port| port.pline == pline }
+			fd = TCPServer.open(pline[:host], pline[:port])
+			puts "#{Time.now} listening on #{pline[:host]}:#{pline[:port]}#{' (ssl)' if pline[:ssl]}"
+			@ports << Port.new(self, fd, pline)
 		}
 
 		@conf.clines.each { |c|
@@ -738,13 +743,13 @@ class Ircd
 			end
 		}
 
-		pending.dup.each { |p|
-			if p.last_pong < tnow - @conf.ping_timeout / 2
-				if p.cline
-					send_global "No response from #{p.cline[:name]} (#{p.cline[:host]}), closing link"
+		pending.dup.each { |pend|
+			if pend.last_pong < tnow - @conf.ping_timeout / 2
+				if pend.cline
+					send_global "No response from #{pend.cline[:name]} (#{pend.cline[:host]}), closing link"
 				end
-				p.send 'ERROR', ':Closing Link: 0.0.0.0 (Ping timeout)'
-				p.cleanup
+				pend.send 'ERROR', ':Closing Link: 0.0.0.0 (Ping timeout)'
+				pend.cleanup
 				next
 			end
 		}
@@ -761,10 +766,10 @@ class Ircd
 
 	# list of sockets we should select(rd)
 	def rd_socks
-		ports.map { |p| p.fd } +
+		ports.map { |port| port.fd } +
 		servers.map { |s| s.fd } +
 		local_users_canread.map { |u| u.fd } +
-		pending.map { |p| p.fd }
+		pending.map { |pend| pend.fd }
 	end
 
 	# fd => Client/Server/Port
@@ -882,6 +887,8 @@ class Conf
 	attr_accessor :ssl_key_path, :ssl_cert_path
 	attr_accessor :user_chan_limit	# max chan per user
 	attr_accessor :max_chan_mode_cmd	# max chan mode change per /mode command
+	attr_accessor :max_nickname_len
+	attr_accessor :max_channame_len
 	attr_accessor :logfile
 	attr_accessor :whowas
 	attr_accessor :cloak_users
@@ -901,6 +908,8 @@ class Conf
 		@ssl_cert_path = 'ssl_cert.pem'
 		@user_chan_limit = 50
 		@max_chan_mode_cmd = 6
+		@max_nickname_len = 32
+		@max_channame_len = 50
 		@whowas = { :maxlen => 5000, :maxdup => 9, :maxage => 3600*24*32 }
 		#@cloak_users = true
 	end
@@ -957,22 +966,22 @@ class Conf
 	# P:127.0.0.1:7000:SSL
 	# P:[123::456:789]:6667
 	def parse_p_line(l)
-		p = {}
+		pline = {}
 		fu = split_ipv6(l)
 		fu.shift	# 'P'
-		p[:host] = fu.shift
-		p[:port] = fu.shift.to_i
-		raise "P:host:port:opts" if p[:port] == 0
+		pline[:host] = fu.shift
+		pline[:port] = fu.shift.to_i
+		raise "P:host:port:opts" if pline[:port] == 0
 		while e = fu.shift
 			case e
-			when 'SSL'; p[:ssl] = true
-			when /^key=(.*)/; p[:ssl_key] = $1; File.open($1){}
-			when /^cert=(.*)/; p[:ssl_cert] = $1; File.open($1){}
+			when 'SSL'; pline[:ssl] = true
+			when /^key=(.*)/; pline[:ssl_key] = $1; File.open($1){}
+			when /^cert=(.*)/; pline[:ssl_cert] = $1; File.open($1){}
 			when '', nil
 			else raise "P:host:port:[SSL[:key=foo.pem:cert=bar.pem]]"
 			end
 		end
-		@plines << p
+		@plines << pline
 	end
 
 	# C:bob.srv.com:127.0.0.1:7001:RC4:ZIP:240	# active connection from us, delay = 240s
