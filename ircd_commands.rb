@@ -1701,6 +1701,9 @@ class Server
 					end
 				end
 			}
+			if u.local?
+				u.send ":#{u.nick} MODE #{u.nick} :#{l[3..-1].join(' ')}"
+			end
 		end
 	end
 
