@@ -1682,6 +1682,7 @@ class Server
 			ts = l[2]
 			mode = l[3]
 			args = l[4..-1]
+			minus = false
 			mode.split(//).each { |m|
 				case m
 				when '+'; minus = false
