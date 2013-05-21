@@ -1529,7 +1529,7 @@ class Server
 			sv_send 319, ask, u.nick, buf if buf
 			sv_send 312, ask, u.nick, u.servername, ":#{u.local? ? usr.ircd.descr : u.from_server.descr}"
 			sv_send 301, ask, u.nick, ":#{u.away}" if u.away
-			sv_send 307, ask, u.nick, ':has identified for this nick' if false
+			sv_send 307, ask, u.nick, ':has identified for this nick'
 			sv_send 313, ask, u.nick, ':is an IRC Operator - Service Administrator' if u.mode.include?('o')
 			sv_send 275, ask, u.nick, ':is using a secure connection (SSL)' if u.mode.include?('S')
 			sv_send 317, ask, u.nick, (Time.now - u.last_active).to_i, u.connect_time.to_i, ':seconds idle, signon time' if u.local?
