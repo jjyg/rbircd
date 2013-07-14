@@ -663,7 +663,7 @@ class User
 			u.send ":#{fqdn} #{msg}" if u.local?
 			@ircd.send_servers ":#@nick #{msg}"
 			sv_send 341, @nick, nick, channame
-			cmd_notice ['NOTICE', "@#{channame}", "#{nick} invited #{u.nick} into channel #{channame}"]
+			cmd_notice ['NOTICE', "@#{channame}", "#{@nick} invited #{u.nick} into channel #{channame}"]
 		end
 	end
 
