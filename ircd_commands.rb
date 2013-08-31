@@ -1113,6 +1113,10 @@ class Server
 	end
 
 	def send_burst
+		if @fd.sync
+			had_sync = true
+			@fd.sync = false
+		end
 		send 'BURST'
 		@ircd.servers.each { |s|
 			next if s == self
@@ -1148,6 +1152,7 @@ class Server
 			send "#{u.nick} AWAY :#{u.away}"
 		}
 		send 'PING', ":#{@ircd.name}"
+		@fd.sync = true if had_sync
 		send 'BURST', 0
 		puts "#{Time.now} connected to #{@name} - sent burst"
 	end
