@@ -142,8 +142,21 @@ class NullCipher
 	end
 end
 
-class CryptoIo
-	attr_accessor :rd, :wr, :fd
+class IoWrap
+	attr_accessor :fd
+	def to_io
+		@fd.to_io
+	end
+	def sync
+		@fd.sync
+	end
+	def sync=(s)
+		@fd.sync = s
+	end
+end
+
+class CryptoIo < IoWrap
+	attr_accessor :rd, :wr
 	# usage: cryptsocket = CryptoIo.new(socket, RC4.new("foobar"), RC4.new("foobar"))
 	# can be chained, and passed to IO.select
 	def initialize(fd, cryptrd, cryptwr)
@@ -158,14 +171,11 @@ class CryptoIo
 	def write(str)
 		@fd.write(@wr.encrypt(str))
 	end
-	def to_io
-		@fd.to_io
-	end
 end
 
 require 'zlib'
-class ZipIo
-	attr_accessor :ziprd, :zipwr, :fd
+class ZipIo < IoWrap
+	attr_accessor :ziprd, :zipwr
 
 	def initialize(fd, ziprd, zipwr)
 		@fd = fd
@@ -196,8 +206,5 @@ class ZipIo
 		@bufrd.length
 	end
 	def write(str)
-	end
-	def to_io
-		@fd.to_io
 	end
 end
