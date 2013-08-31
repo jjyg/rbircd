@@ -15,8 +15,10 @@ module HasSock
 		puts "< #{msg}" if $DEBUG
 		@fd.write msg
 	rescue
-		puts "#{Time.now} hs.send #{self.class} #{respond_to?(:fqdn) ? fqdn : self} #{$!.class} #{$!.message}"
+		puts "#{Time.now} hs.send #{self.class} #{respond_to?(:fqdn) ? fqdn : self} #{$!.class} #{$!.message}", $!.backtrace, ''
+		$stdout.flush
 		cleanup if respond_to?(:cleanup)
+		raise
 	end
 
 	# send() with ircd name prefixed
@@ -90,6 +92,7 @@ class User
 		end
 	rescue
 		puts "#{Time.now} user.canread #{fqdn} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
+		$stdout.flush
 	end
 
 	def cleanup(reason=":#{fqdn} QUIT :Remote host closed the connection", sendservers = true, cleanchans = true)
@@ -115,7 +118,8 @@ class User
 		puts "< #{msg}" if $DEBUG
 		(fd || from_server.fd).write msg
 	rescue
-		puts "#{Time.now} user.send #{fqdn} #{$!.class} #{$!.message}"
+		puts "#{Time.now} user.send #{fqdn} #{$!.class} #{$!.message}", $!.backtrace, ''
+		$stdout.flush
 		cleanup ":#{fqdn} QUIT :Broken pipe" if fd
 	end
 
@@ -173,8 +177,9 @@ class Server
 	rescue Timeout::Error
 		ircd.send_global "Routing - connection to #{cline[:name]} timed out"
 	rescue
-		ircd.send_global "Routing - connection to #{cline[:name]} refused (#{$!.message})"
 		puts "#{Time.now} sv.sconnect #{cline[:name]} #{$!.class} #{$!.message}", $!.backtrace, ''
+		$stdout.flush
+		ircd.send_global "Routing - connection to #{cline[:name]} refused (#{$!.message})"
 	end
 
 	def can_read
@@ -185,6 +190,7 @@ class Server
 		end
 	rescue
 		puts "#{Time.now} sv.canread #{@name} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
+		$stdout.flush
 	end
 
 	def cleanup
@@ -252,6 +258,7 @@ class Port
 		# dont care
 	rescue
 		puts "#{Time.now} port.canread #{@pline[:host]} #{@pline[:port]} #{$!.class} #{$!.message}", $!.backtrace, ''
+		$stdout.flush
 	end
 
 	def accept_ssl(fd)
@@ -301,6 +308,7 @@ class Pending
 		end
 	rescue
 		puts "#{Time.now} pend.canread #{@nick} #{@hostname} #{$!.class} #{$!.message} #{l.inspect}", $!.backtrace, ''
+		$stdout.flush
 	end
 
 	def cleanup
@@ -702,6 +710,7 @@ class Ircd
 		wait_sockets
 	rescue
 		puts "#{Time.now} ircd.mainiter #{$!.class} #{$!.message}", $!.backtrace, ''
+		$stdout.flush
 		sleep 0.4
 	end
 
@@ -794,8 +803,8 @@ class Ircd
 		end
 
 		while (fd.respond_to?(:pending) and fd.pending > 0) or IO.select([fd], nil, nil, 0)
-			return if not c = fd.read(1)
 			return if l.length > maxlen*8
+			return if not c = fd.read(1)
 			if c == "\n"
 				l = l[0, maxlen].chomp
 				puts "> #{l}" if $DEBUG
@@ -807,7 +816,8 @@ class Ircd
 		''
 	rescue
 		r = fd_to_recv(fd)
-		puts "#{Time.now} ircd.fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}"
+		puts "#{Time.now} ircd.fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}", $!.backtrace, ''
+		$stdout.flush
 	end
 
 	# ":abc d e f :g h"  =>  [":abc", "d", "e", "f", "g h"]
