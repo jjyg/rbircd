@@ -818,6 +818,7 @@ class Ircd
 		r = fd_to_recv(fd)
 		puts "#{Time.now} ircd.fd_gets #{r.respond_to?(:fqdn) ? r.fqdn : r}  #{$!.class}  #{$!.message}", $!.backtrace, ''
 		$stdout.flush
+		nil
 	end
 
 	# ":abc d e f :g h"  =>  [":abc", "d", "e", "f", "g h"]
