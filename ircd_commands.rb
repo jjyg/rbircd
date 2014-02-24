@@ -1120,9 +1120,9 @@ class Server
 		send 'BURST'
 		@ircd.servers.each { |s|
 			next if s == self
-			sv_send 'SERVER', s.name, 2, ":#{s.descr}"
+			sv_send_wait 'SERVER', s.name, 2, ":#{s.descr}"
 			s.servers.each { |ss|
-				sv_send 'SERVER', ss[:name], ss[:hops]+1, ":#{ss[:descr]}"
+				sv_send_wait 'SERVER', ss[:name], ss[:hops]+1, ":#{ss[:descr]}"
 			}
 		}
 		@ircd.users.each { |u|
@@ -1137,13 +1137,13 @@ class Server
 			send_topic(c)
 			ts = @ts_delta ? 0 : ''
 			c.bans.each { |b|
-				sv_send 'MODE', c.name, ts, '+b', b[:mask]
+				sv_send_wait 'MODE', c.name, ts, '+b', b[:mask]
 			}
 			c.banexcept.each { |e|
-				sv_send 'MODE', c.name, ts, '+e', e[:mask]
+				sv_send_wait 'MODE', c.name, ts, '+e', e[:mask]
 			}
 			c.invexcept.each { |e|
-				sv_send 'MODE', c.name, ts, '+I', e[:mask]
+				sv_send_wait 'MODE', c.name, ts, '+I', e[:mask]
 			}
 		}
 		@ircd.users.each { |u|
@@ -1169,7 +1169,7 @@ class Server
 
 	def send_nick_full(u)
 		flags = 0	# XXX
-		sv_send "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} 0 #{flags} :#{u.descr}"
+		sv_send_wait "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} 0 #{flags} :#{u.descr}"
 	end
 
 	def send_chan_full(c)
@@ -1190,12 +1190,12 @@ class Server
 			pfx << '+' if c.voice?(u)
 			ulist << "#{pfx}#{u.nick}"
 			if ulist.join(' ').length > 200
-				sv_send 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
+				sv_send_wait 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
 				m, ma, ulist = '+', [], []
 			end
 		}
 		if not ulist.empty?
-			sv_send 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
+			sv_send_wait 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
 		end
 	end
 

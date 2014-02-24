@@ -25,6 +25,12 @@ module HasSock
 	def sv_send(*a)
 		send ":#{@ircd.name} #{a.join(' ')}"
 	end
+
+	# sv_send after an IO.select says we can write
+	def sv_send_wait(*a)
+		IO.select(nil, [@fd], nil, 10)
+		sv_send(*a)
+	end
 end
 
 # a client connection
