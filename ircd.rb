@@ -905,11 +905,13 @@ class Conf
 	attr_accessor :whowas
 	attr_accessor :cloak_users
 	attr_accessor :user_pass	# required client PASS
+	attr_accessor :misc
 
 	def initialize
 		@plines = []
 		@olines = []
 		@clines = []
+		@misc = {}
 
 		# config elements that have no corresponding line in the conf
 		# edit this file to change values
@@ -936,6 +938,7 @@ class Conf
 			when 'C'; parse_c_line(l)
 			when 'O'; parse_o_line(l)
 			when 'PASS'; @user_pass = l.split(':', 2)[1]
+			when 'MISC'; k, v = l.split(':', 3)[1, 2] ; @misc[k.downcase] = v.strip
 			when /^#/
 			when nil
 			else raise "Unknown configuration line #{l.inspect}"

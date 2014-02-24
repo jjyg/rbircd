@@ -1155,6 +1155,16 @@ class Server
 		@fd.sync = true if had_sync
 		send 'BURST', 0
 		puts "#{Time.now} connected to #{@name} - sent burst"
+	rescue
+		puts "#{Time.now} burst failed"
+		@@burst_failed ||= 0
+		@@burst_failed += 1
+		limit = @ircd.conf.misc['abort_on_failed_sconnect']
+		if limit and @@burst_failed > limit.to_i
+			puts "#{Time.now} screw you guys, im going home"
+			exit!
+		end
+		raise
 	end
 
 	def send_nick_full(u)
