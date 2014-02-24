@@ -1162,6 +1162,7 @@ class Server
 		limit = @ircd.conf.misc['abort_on_failed_sconnect']
 		if limit and @@burst_failed > limit.to_i
 			puts "#{Time.now} screw you guys, im going home"
+			$stdout.flush
 			exit!
 		end
 		raise
