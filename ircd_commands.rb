@@ -1118,6 +1118,7 @@ class Server
 			@fd.sync = false
 		end
 		send 'BURST'
+		puts "#{Time.now} sending burst - #{@ircd.servers.length} servers - #{@ircd.users.length} users - #{@ircd.chans.length} chans"
 		@ircd.servers.each { |s|
 			next if s == self
 			sv_send_wait 'SERVER', s.name, 2, ":#{s.descr}"
@@ -1170,7 +1171,7 @@ class Server
 
 	def send_nick_full(u)
 		flags = 0	# XXX
-		sv_send_wait "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} 0 #{flags} :#{u.descr}"
+		send "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} #{flags} #{cur_ts(ts)} :#{u.descr}"
 	end
 
 	def send_chan_full(c)

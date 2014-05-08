@@ -66,7 +66,7 @@ class User
 			@servername = @ircd.name
 			@serverdescr = @ircd.descr
 		end
-		@mode = ''
+		@mode = 'i'
 		@away = nil
 		@connect_time = @last_active = @last_ping = @last_pong = Time.now.to_f
 		@next_read_time = @last_active - 10
@@ -142,7 +142,7 @@ class User
 			"NICKLEN=#{@ircd.conf.max_nickname_len} MODES=#{@ircd.conf.max_chan_mode_cmd} CHANTYPES=#& " +
 			"CHANLIMIT=#:100 PREFIX=(ov)@+ CASEMAPPING=ascii :available on this server"
 		cmd_motd ['MOTD']
-		cmd_mode ['MODE', @nick, '+i']
+		send ":#@nick MODE #@nick :+i" if @mode.include? 'i'
 		send ":#@nick MODE #@nick :+S" if @mode.include? 'S'
 	end
 end
@@ -156,6 +156,7 @@ class Server
 	attr_accessor :last_ping, :last_pong
 	# remote servers behind this connection, :name, :hops, :descr
 	attr_accessor :servers
+	attr_accessor :ts
 
 	def initialize(ircd, fd, cline)
 		@ircd = ircd
@@ -164,6 +165,7 @@ class Server
 		@name = cline[:name]
 		@last_ping = @last_pong = Time.now.to_f
 		@servers = []
+		@ts = Time.now.to_i
 	end
 
 	def self.sconnect(ircd, cline)
