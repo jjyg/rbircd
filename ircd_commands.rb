@@ -161,6 +161,10 @@ class User
 				@ircd.send_chan_local(chan, ":#{fqdn} JOIN :#{channame}")
 				cmd_topic ['TOPIC', channame] if chan.topic
 				cmd_names ['NAMES', channame]
+				if @ircd.conf.misc['broken_cmode_s'] and chan.mode.include?('S') and @mode.include?('S')
+					# for ircds that have problem trusting forwarded umode +S and prevent our ssl users from talking on +S channels, we samode chan +v user
+					do_cmd_mode_chan(chan, ['mode', chan.name, '+v', @nick])
+				end
 			end
 		else
 			if chans.length >= @ircd.conf.user_chan_limit

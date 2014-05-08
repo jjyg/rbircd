@@ -946,7 +946,7 @@ class Conf
 			when 'C'; parse_c_line(l)
 			when 'O'; parse_o_line(l)
 			when 'PASS'; @user_pass = l.split(':', 2)[1]
-			when 'MISC'; k, v = l.split(':', 3)[1, 2] ; @misc[k.downcase] = v.strip
+			when 'MISC'; k, v = l.split(':', 3)[1, 2] ; @misc[k.downcase] = v.to_s.strip
 			when /^#/
 			when nil
 			else raise "Unknown configuration line #{l.inspect}"
