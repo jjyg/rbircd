@@ -8,9 +8,9 @@ Also, when using one rbircd server in your irc network, you may introduce arbitr
 
 
 To launch the daemon, you can run (foreground)
- ruby -r ircd -e 'Ircd.run("my_config.txt")'
+ ruby -r ./ircd.rb -e 'Ircd.run("my_config.txt")'
 or (background)
- ruby -r ircd -e 'Ircd.run_bg("my_config.txt", "irc_log.txt")'
+ ruby -r ./ircd.rb -e 'Ircd.run_bg("my_config.txt", "irc_log.txt")'
 
 The server will reload its source/configuration on SIGHUP, or on the 'REHASH' command from an oper.
 
