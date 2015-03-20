@@ -886,7 +886,7 @@ class User
 		return if chk_oper(l)
 		return if chk_parm(l, 1)
 
-		cline = @ircd.clines.find { |c| [c[:name], c[:host], "#{c[:host]}:#{c[:port]}"].find { |ce| @ircd.streq(ce, l[1]) } }
+		cline = @ircd.conf.clines.find { |c| [c[:name], c[:host], "#{c[:host]}:#{c[:port]}"].find { |ce| @ircd.streq(ce, l[1]) } }
 		if not cline
 			sv_send 'NOTICE', @nick, ":No C-line for #{l[1]}"
 			return
