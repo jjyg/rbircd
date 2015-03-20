@@ -115,8 +115,8 @@ class User
 	def cmd_motd(l)
 		sv_send 375, @nick, ":- #{@ircd.name} message of the day"
 		sv_send 372, @nick, ":- #{Time.now.strftime('%d/%m/%Y %H:%M')}"
-		File.read(@ircd.conf.motd_path).each_line { |l|
-			sv_send 372, @nick, ":- #{l.chomp}"
+		File.read(@ircd.conf.motd_path).each_line { |l2|
+			sv_send 372, @nick, ":- #{l2.chomp}"
 		} rescue nil
 		sv_send 376, @nick, ':End of /MOTD command'
 	end
@@ -298,7 +298,7 @@ class User
 			case m
 			when '+', '-'; minus = (m == '-') ; next
 			when 'b', 'e', 'I'	# bans/excepts
-				if not parm = params.shift
+				if not params.shift
 					stuff = case m
 						when 'I'; { :list => chan.invexcept, :nr => 346, :name => 'invite' }
 						when 'e'; { :list => chan.banexcept, :nr => 348, :name => 'exempt' }
@@ -368,7 +368,7 @@ class User
 			when 'o', 'v'	# ops/voices
 				list = (m == 'o' ? chan.ops : chan.voices)
 				next if not parm = params.shift
-				if not u = chan.users.find { |u| @ircd.streq(u.nick, parm) }
+				if not u = chan.users.find { |uu| @ircd.streq(uu.nick, parm) }
 					sv_send 401, @nick, parm, ':No such nick/channel' if not @ircd.find_user(parm)
 					sv_send 441, @nick, parm, chan.name, ':They are not on that channel'
 					next
@@ -1279,8 +1279,7 @@ class Server
 			nick = from[1..-1]
 			newnick = l[1]
 			ts = l[2].to_i
-			if cf = @ircd.find_user(newnick) and false
-			elsif u = @ircd.find_user(nick)
+			if u = @ircd.find_user(nick)
 				oldfqdn = u.fqdn
 				@ircd.del_user u
 				u.nick = newnick
@@ -1308,8 +1307,8 @@ class Server
 			u.mode = l[4][1..-1] if l[4][0] == ?+
 			u.descr = l[10]
 			u.servername = l[7]
-			u.serverdescr = ((s = @ircd.servers.find { |s| s.name == u.servername }) ? s.descr : nil)
-			u.serverdescr ||= ((s = @ircd.servers.map { |s| s.servers }.flatten.find { |s| s[:name] == u.servername }) ? s[:descr] : nil)
+			u.serverdescr = ((s = @ircd.servers.find { |ss| ss.name == u.servername }) ? s.descr : nil)
+			u.serverdescr ||= ((s = @ircd.servers.map { |ss| ss.servers }.flatten.find { |ss| ss[:name] == u.servername }) ? s[:descr] : nil)
 			@ircd.add_user u
 		end
 	end
@@ -1585,7 +1584,7 @@ class Server
 
 	def cmd_quit(l, from)
 		forward(l, from)
-		nick, user, host = split_nih(from[1..-1])
+		nick, _, _ = split_nih(from[1..-1])
 		if u = @ircd.find_user(nick)
 			if u.local?
 				u.send "ERROR :Closing Link: #{u.hostname} (Quit: #{l[1]})"
@@ -1596,7 +1595,7 @@ class Server
 
 	def cmd_kill(l, from)
 		forward(l, from)
-		nick, user, host = split_nih(l[1])
+		nick, _, _ = split_nih(l[1])
 		if u = @ircd.find_user(nick)
 			if u.local?
 				u.send "ERROR :Closing Link: #{@ircd.name} #{l[1]} (KILLED by #{from[1..-1]} (#{l[2]}))"
@@ -1700,7 +1699,7 @@ class Server
 	def cmd_svsmode(l, from)
 		forward(l, from)
 		if u = @ircd.find_user(l[1])
-			ts = l[2]
+			#ts = l[2]
 			mode = l[3]
 			args = l[4..-1]
 			minus = false
@@ -1734,9 +1733,8 @@ class Server
 		forward(l, from)
 		nick = l[1]
 		newnick = l[2]
-		ts = l[3].to_i
-		if cf = @ircd.find_user(newnick) and false
-		elsif u = @ircd.find_user(nick) and u.local?
+		#ts = l[3].to_i
+		if u = @ircd.find_user(nick) and u.local?
 			u.cmd_nick(['NICK', newnick], true)
 		end
 	end

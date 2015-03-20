@@ -219,7 +219,6 @@ class Server
 	end
 
 	def handle_line(l)
-		cmd = l[0]
 		if l[0] and l[0][0] == ?:
 			from = l.shift
 		end
@@ -250,8 +249,8 @@ class Port
 			@sslctx = OpenSSL::SSL::SSLContext.new
 			kp = @pline[:ssl_key]  || @ircd.conf.ssl_key_path
 			cp = @pline[:ssl_cert] || @ircd.conf.ssl_cert_path
-			@sslctx.key  = File.open(kp, 'rb') { |fd| OpenSSL::PKey::RSA.new(fd) }
-			@sslctx.cert = File.open(cp, 'rb') { |fd| OpenSSL::X509::Certificate.new(fd) }
+			@sslctx.key  = File.open(kp, 'rb') { |fd2| OpenSSL::PKey::RSA.new(fd2) }
+			@sslctx.cert = File.open(cp, 'rb') { |fd2| OpenSSL::X509::Certificate.new(fd2) }
 		end
 	end
 
@@ -776,7 +775,7 @@ class Ircd
 	def wait_sockets
 		rs = rd_socks
 		rd = rs.find_all { |fd| fd.respond_to?(:pending) and fd.pending > 0 }
-		rd, wr = IO.select(rs, nil, nil, 2) if rd.empty?
+		rd, _ = IO.select(rs, nil, nil, 2) if rd.empty?
 		rd.to_a.each { |fd|
 			fd_to_recv(fd).can_read
 		}
@@ -801,7 +800,7 @@ class Ircd
 
 		if @fd_lines.length > 10
 			tnow = Time.now.to_i
-			@fd_lines.delete_if { |f, (t, l)| t < tnow - 5 }
+			@fd_lines.delete_if { |f, (t, _)| t < tnow - 5 }
 		end
 
 		if c = @fd_lines.delete(fd)
