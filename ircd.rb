@@ -679,6 +679,7 @@ class Ircd
 	end
 
 	def send_global_local(msg, qual='Global')
+		puts "#{Time.now} *** #{qual} -- #{msg}"
 		local_users.find_all { |u|
 			u.mode.include? 'g' or u.mode.include? 'o'
 		}.each { |u| u.sv_send 'NOTICE', u.nick, ":*** #{qual} -- #{msg}" }
