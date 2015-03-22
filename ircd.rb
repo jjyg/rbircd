@@ -577,7 +577,7 @@ class Ircd
 
 	# checks that a nickname is valid (no forbidden characters)
 	def check_nickname(n)
-		return if n =~ /^(nick|chan|oper)serv$/
+		return if n =~ /^(nick|chan|oper)serv$/i
 		n.length < conf.max_nickname_len and n =~ /^[a-z_`\[\]\\{}|\^][a-z_`\[\]\\{}|\^0-9-]*$/i
 	end
 
