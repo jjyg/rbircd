@@ -157,6 +157,7 @@ class Server
 	# remote servers behind this connection, :name, :hops, :descr
 	attr_accessor :servers
 	attr_accessor :ts
+	attr_accessor :proto
 
 	def initialize(ircd, fd, cline)
 		@ircd = ircd
@@ -166,6 +167,7 @@ class Server
 		@last_ping = @last_pong = Time.now.to_f
 		@servers = []
 		@ts = Time.now.to_i
+		@proto = @cline[:proto]
 	end
 
 	def self.sconnect(ircd, cline)
@@ -394,10 +396,16 @@ class Pending
 	def sconnect(cline)
 		@cline = cline
 
-		send 'PASS', @cline[:pass], ':TS'
-		send 'CAPAB', 'SSJOIN', 'NOQUIT', 'NICKIP', 'BURST', 'TS3', "TSMODE#{' DKEY' if @cline[:rc4]}#{' ZIP' if @cline[:zip]}"
-		send 'SERVER', @ircd.name, ":#{@ircd.descr}"
-		send 'SVINFO', 3, 3, 0, ":#{Time.now.to_i}"
+		case @cline[:proto]
+		when :bahamut
+			send 'PASS', @cline[:pass], ':TS'
+			send 'CAPAB', 'SSJOIN', 'NOQUIT', 'NICKIP', 'BURST', 'TS3', "TSMODE#{' DKEY' if @cline[:rc4]}#{' ZIP' if @cline[:zip]}"
+			send 'SERVER', @ircd.name, ":#{@ircd.descr}"
+			send 'SVINFO', 3, 3, 0, ":#{Time.now.to_i}"
+		when :unreal
+			send 'PASS', @cline[:pass]
+			send 'SERVER', @ircd.name, '1', ":#{@ircd.descr}"
+		end
 	end
 
 	def check_server_conn
@@ -519,7 +527,7 @@ class Ircd
 	end
 
 	def version
-		"rbircd-0.0.28"
+		"rbircd-0.1.28"
 	end
 
 	def rehash
@@ -1008,7 +1016,7 @@ class Conf
 	end
 
 	# C:bob.srv.com:127.0.0.1:7001:RC4:ZIP:240	# active connection from us, delay = 240s
-	# C:danny.ircd:127.0.0.2::RC4		# passive cx (listen only)
+	# C:danny.ircd:127.0.0.2::RC4:PROTO=unreal	# passive cx (listen only) to an unrealircd server
 	def parse_c_line(l)
 		c = {}
 		fu = split_ipv6(l)
@@ -1029,11 +1037,18 @@ class Conf
 			when 'RC4'; c[:rc4] = true
 			#when 'ZIP'; c[:zip] = true	# XXX unsupported
 			when 'SSL'; c[:ssl] = true	# only used for outgoing cx ; TODO cert checks
+			when /^PROTO=(.*)/
+				proto = $1
+				case proto
+				when 'bahamut', 'unreal'; c[:proto] = proto.to_sym
+				else raise "unsupported server protocol in cline: #{proto.inspect}"
+				end
 			when /^\d+$/; c[:delay] = e.to_i
 			when '', nil
 			else raise "C:host:[port]:pass:[RC4]:[ZIP]:[delay]"
 			end
 		end
+		c[:proto] ||= :bahamut
 		@clines << c
 	end
 

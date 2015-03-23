@@ -1156,9 +1156,15 @@ class Server
 			next if u.from_server == self
 			send "#{u.nick} AWAY :#{u.away}"
 		}
-		send 'PING', ":#{@ircd.name}"
 		@fd.sync = true if had_sync
-		send 'BURST', 0
+		case @proto
+		when :bahamut
+			send 'PING', ":#{@ircd.name}"
+			send 'BURST', 0
+		when :unreal
+			#send 'NETINFO'	# TODO
+			sv_send 'EOS'
+		end
 		puts "#{Time.now} connected to #{@name} - sent burst"
 	rescue
 		puts "#{Time.now} burst failed"
@@ -1174,8 +1180,18 @@ class Server
 	end
 
 	def send_nick_full(u)
-		flags = 0	# XXX
-		send "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} #{flags} #{cur_ts(ts)} :#{u.descr}"
+		case @proto
+		when :bahamut
+			flags = 0	# TODO
+			send "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} +#{u.mode} #{u.ident} #{u.hostname} #{u.servername} #{flags} #{cur_ts(ts)} :#{u.descr}"
+		when :unreal
+			servicenick = 0	# TODO identified to nickserv under this
+			send "NICK #{u.nick} #{u.serverhops} #{cur_ts(u.ts)} #{u.ident} #{u.hostname} #{u.servername} #{servicenick} :#{u.descr}"
+			send ":#{u.nick} MODE #{u.nick} :+#{u.mode}"
+			#send ":#{u.nick} SETHOST #{u.cloakhost}"
+			chans = u.chans.map { |c| c.name }.find_all { |cn| cn[0] != ?& }.join(',')
+			send ":#{u.nick} JOIN #{chans}" if chans.length > 0
+		end
 	end
 
 	def send_chan_full(c)
@@ -1189,19 +1205,32 @@ class Server
 			m << 'k'
 			ma << c.key
 		end
-		ulist = []
-		c.users.each { |u|
-			pfx = ''
-			pfx << '@' if c.op?(u)
-			pfx << '+' if c.voice?(u)
-			ulist << "#{pfx}#{u.nick}"
-			if ulist.join(' ').length > 200
+		case @proto
+		when :bahamut
+			ulist = []
+			c.users.each { |u|
+				pfx = ''
+				pfx << '@' if c.op?(u)
+				pfx << '+' if c.voice?(u)
+				ulist << "#{pfx}#{u.nick}"
+				if ulist.join(' ').length > 200
+					sv_send_wait 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
+					m, ma, ulist = '+', [], []
+				end
+			}
+			if not ulist.empty?
 				sv_send_wait 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
-				m, ma, ulist = '+', [], []
 			end
-		}
-		if not ulist.empty?
-			sv_send_wait 'SJOIN', cur_ts(c.ts), c.name, "#{[m, ma].join(' ')}", ":#{ulist.join(' ')}"
+		when :unreal
+			c.users.each { |u|
+				if c.op?(u) ; m << 'o' ; ma << u.nick ; end
+				if c.voice?(u) ; m << 'v' ; ma << u.nick ; end
+				if m.length > 10
+					sv_send_wait 'MODE', c.name, "#{[m, ma].join(' ')}", cur_ts(c.ts)
+					m, ma, ulist = '+', [], []
+				end
+			}
+			sv_send_wait 'MODE', c.name, "#{[m, ma].join(' ')}", cur_ts(c.ts)
 		end
 	end
 
@@ -1293,7 +1322,6 @@ class Server
 				@ircd.add_user u
 			end
 		else # new nick
-			# NICK mynick hops ts +oiwh myident myhost mysrv 0 2130706433 :mydescr
 			if u = @ircd.find_user(l[1])
 				# TODO timestamp stuff
 				if u.local?
@@ -1302,18 +1330,47 @@ class Server
 				u.cleanup ":#{u.fqdn} QUIT :Killed (collision)", false
 				forward(['KILL', l[1], "irc!#{l[1]} (collision)"], @name)
 			end
-			u = User.new(@ircd, l[1], l[5], l[6], self)
-			u.ts = l[3].to_i
-			u.mode = l[4][1..-1] if l[4][0] == ?+
-			u.descr = l[10]
-			u.servername = l[7]
+			case @proto
+			when :bahamut
+				# NICK mynick hops ts +oiwh myident myhost mysrv 0 2130706433 :mydescr
+				u = User.new(@ircd, l[1], l[5], l[6], self)
+				u.ts = l[3].to_i
+				u.mode = l[4][1..-1] if l[4][0] == ?+
+				u.descr = l[10]
+				u.servername = l[7]
+			when :unreal
+				# NICK mynick hops ts myident myhost mysrv mynickservname :mydescr
+				u = User.new(@ircd, l[1], l[4], l[5], self)
+				u.ts = l[3].to_i
+				u.descr = l.last
+				u.servername = l[6]
+			end
 			u.serverdescr = ((s = @ircd.servers.find { |ss| ss.name == u.servername }) ? s.descr : nil)
 			u.serverdescr ||= ((s = @ircd.servers.map { |ss| ss.servers }.flatten.find { |ss| ss[:name] == u.servername }) ? s[:descr] : nil)
 			@ircd.add_user u
 		end
 	end
 
+	def cmd_join(l, from)
+		# unreal only
+		# :nick JOIN #chan,#chan2	(during sconnect sync)
+		forward(l, from)
+		clist = l[2].split(',')
+		clist.each { |cn|
+			if not c = @ircd.find_chan(cn)
+				c = Channel.new(@ircd, cn)
+				@ircd.add_chan c
+			end
+			u = may_create_user(from[1..-1])
+			if not c.users.include?(u)
+				@ircd.send_chan_local(c, ":#{u.fqdn} JOIN #{c.name}")
+				c.users << u
+			end
+		}
+	end
+
 	def cmd_sjoin(l, from)
+		# bahamut only
 		forward(l, from)
 		if not c = @ircd.find_chan(l[2])
 			c = Channel.new(@ircd, l[2])
@@ -1634,7 +1691,7 @@ class Server
 	def cmd_svinfo(l, from)
 		case l[1]
 		when 'ZIP'
-			send 'SVINFO', 'ZIP'
+			#send 'SVINFO', 'ZIP'
 			if @cline[:zip] and @capab.to_a.include?('ZIP')
 				# ruby-zlib is the sux !
 				#p Zlib::Inflate.inflate(@fd.read(4096))
