@@ -941,6 +941,7 @@ class Conf
 		@max_nickname_len = 32
 		@max_channame_len = 50
 		@whowas = { :maxlen => 5000, :maxdup => 9, :maxage => 3600*24*32 }
+		@name = 'ircd.ruby'
 		#@cloak_users = true
 	end
 
