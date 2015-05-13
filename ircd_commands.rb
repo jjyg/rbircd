@@ -526,7 +526,7 @@ class User
 	def cmd_list(l)
 		sv_send 321, @nick, 'Channel', ':Users'
 		(l[1] ? [@ircd.find_chan(l[1])].compact : @ircd.chans).each { |chan|
-			if !(chan.mode.include?('p') or chan.mode.include?('s')) or chan.users.include?(self) or @mode.include?('o')
+			if !chan.mode.include?('s') or chan.users.include?(self) or @mode.include?('o')
 				sv_send 322, @nick, chan.name, chan.users.length, ":#{chan.topic}"
 			end
 		}
